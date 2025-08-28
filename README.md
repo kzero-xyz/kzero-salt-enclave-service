@@ -8,13 +8,15 @@ This project provides a Docker-based environment for developing and testing Inte
 
 ## Prerequisites
 
-- **Operating System**: Ubuntu 18.04+ (recommended)
+- **Operating System**: Ubuntu 20.04+ (recommended)
+- **Architecture**: x86_64
 - **Docker**: Version 20.10+ 
 - **Storage**: At least 8GB free disk space
 
 ## Quick Start
 
 ### 1. Build the Docker Image
+> **Note:** Build time depends on your machine's performance. For reference, on a 4-CPU Intel(R) Xeon(R) CPU E5-2680 v2 @ 2.80GHz (CPU MHz: 2792.998), the build process takes approximately 50 minutes.
 
 ```bash
 docker build -t test-enclave:latest .
