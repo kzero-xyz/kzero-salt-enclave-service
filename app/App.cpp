@@ -23,7 +23,7 @@ static struct MHD_Daemon* http_daemon = NULL;
 static volatile int server_running = 0;
 
 // Constant definitions
-static const char* ENCLAVE_FILE = "bin/Enclave.signed.so";
+static const char* ENCLAVE_FILE = "enclave.signed.so";
 static const char* GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 static const char* AUDIENCE = "560629365517-mt9j9arflcgi35i8hpoptr66qgo1lmfm.apps.googleusercontent.com";
 static const int SERVER_PORT = 8080;
@@ -753,7 +753,7 @@ char* process_jwt_token(const char* jwt_token) {
 }
 
 // HTTP request handler function
-static enum MHD_Result handle_request(void* cls, struct MHD_Connection* connection,
+static int handle_request(void* cls, struct MHD_Connection* connection,
                          const char* url, const char* method,
                          const char* version, const char* upload_data,
                          size_t* upload_data_size, void** con_cls) {

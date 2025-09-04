@@ -18,7 +18,7 @@
 ######## SGX SDK Settings ########
 
 SGX_SDK ?= /opt/intel/sgxsdk
-SGX_MODE ?= SIM
+SGX_MODE ?= HW
 SGX_ARCH ?= x64
 SGX_DEBUG ?= 1
 
@@ -63,8 +63,8 @@ else
 endif
 
 App_Cpp_Files := App/App.cpp
-App_Include_Paths := -IApp -I$(SGX_SDK)/include -I/usr/local/include
-App_C_Flags := -fPIC -Wno-attributes -fpermissive -Wno-deprecated-declarations $(App_Include_Paths)
+App_Include_Paths := -IInclude -IApp -I$(SGX_SDK)/include -I/usr/local/include
+App_C_Flags := -fPIC -Wno-attributes $(App_Include_Paths)
 
 ifeq ($(SGX_DEBUG), 1)
     App_C_Flags += -DDEBUG -UNDEBUG -UEDEBUG
@@ -76,7 +76,7 @@ App_Cpp_Flags := $(App_C_Flags)
 App_Link_Flags := -L$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -lcurl -ljson-c -lssl -lcrypto -lmicrohttpd
 
 App_Cpp_Objects := $(App_Cpp_Files:.cpp=.o)
-App_Name := bin/app
+App_Name := app
 
 ifneq ($(SGX_MODE), HW)
     Trts_Library_Name := sgx_trts_sim
@@ -89,7 +89,7 @@ endif
 Crypto_Library_Name := sgx_tcrypto
 
 Enclave_Cpp_Files := Enclave/Enclave.cpp
-Enclave_Include_Paths := -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
+Enclave_Include_Paths := -IInclude -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
 
 Enclave_C_Flags := $(Enclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections
 Enclave_Cpp_Flags := $(Enclave_C_Flags) -nostdinc++
@@ -97,7 +97,7 @@ Enclave_Cpp_Flags := $(Enclave_C_Flags) -nostdinc++
 Enclave_Security_Link_Flags := -Wl,-z,relro,-z,now,-z,noexecstack
 
 Enclave_Link_Flags := $(Enclave_Security_Link_Flags) \
-    -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_LIBRARY_PATH) \
+    -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_TRUSTED_LIBRARY_PATH) \
     -Wl,--whole-archive -l$(Trts_Library_Name) -Wl,--no-whole-archive \
     -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group \
     -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
@@ -106,8 +106,8 @@ Enclave_Link_Flags := $(Enclave_Security_Link_Flags) \
 
 Enclave_Cpp_Objects := $(sort $(Enclave_Cpp_Files:.cpp=.o))
 
-Enclave_Name := bin/Enclave.so
-Signed_Enclave_Name := bin/Enclave.signed.so
+Enclave_Name := enclave.so
+Signed_Enclave_Name := enclave.signed.so
 Enclave_Config_File := Enclave/Enclave.config.xml
 Enclave_Test_Key := Enclave_private_test.pem
 
@@ -154,7 +154,7 @@ ifneq ($(Build_Mode), HW_RELEASE)
 endif
 
 .config_$(Build_Mode)_$(SGX_ARCH):
-	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.*
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Enclave_u.* $(Enclave_Cpp_Objects) Enclave_t.*
 	@touch .config_$(Build_Mode)_$(SGX_ARCH)
 
 App/Enclave_u.h: $(SGX_EDGER8R) Enclave/Enclave.edl
