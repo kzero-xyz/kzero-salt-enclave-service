@@ -25,7 +25,7 @@ static volatile int server_running = 0;
 // Constant definitions
 static const char* ENCLAVE_FILE = "bin/Enclave.signed.so";
 static const char* GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-static const char* AUDIENCE = "1018510091317-4b0gdk0uqarqg8r9ssac33c5jdpglve4.apps.googleusercontent.com";
+static const char* AUDIENCE = "560629365517-mt9j9arflcgi35i8hpoptr66qgo1lmfm.apps.googleusercontent.com";
 static const int SERVER_PORT = 8080;
 
 // HTTP response structure
@@ -718,7 +718,8 @@ char* process_jwt_token(const char* jwt_token) {
     
     // First try Google JWT verification
     if (verify_google_jwt(jwt_token) != 0) {
-        printf("[DEBUG] Google JWT verification failed\n");
+        printf("[ERROR] Google JWT verification failed\n");
+        return NULL;  // Return NULL on verification failure
     } else {
         printf("[DEBUG] Google JWT verification successful\n");
     }
