@@ -1,4 +1,4 @@
-<!-- Please refer to User's Guide for the explanation of each field -->
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <EnclaveConfiguration>
   <ProdID>0</ProdID>
   <ISVSVN>0</ISVSVN>

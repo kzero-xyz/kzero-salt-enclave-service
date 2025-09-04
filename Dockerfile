@@ -1,4 +1,4 @@
-# Stage 1: Base Environment
+# Base Environment
 FROM ubuntu:22.04 AS base
 
 # Set environment variables
@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     ca-certificates \
     cmake \
+    libjson-c-dev \
+    libjwt-dev \
+    libmicrohttpd-dev \
     python3 \
     python3-pip \
     python-is-python3 \
@@ -24,28 +27,23 @@ RUN apt-get update && apt-get install -y \
     autoconf \
     libtool \
     unzip \
+    protobuf-compiler \
+    libprotobuf-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Stage 2: Intel SGX SDK Build
 FROM base AS sgx-builder
 
-# Install Rust nightly version (using 2024-10-17 version)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly-2024-10-17
-ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /opt
+RUN git clone https://github.com/Thalhammer/jwt-cpp.git
+WORKDIR /opt/jwt-cpp
+RUN mkdir build && cd build && cmake .. && make -j4
+RUN cd build && make install
 
-# Install rust-src component (required by xargo)
-RUN rustup component add rust-src
-
-# Install xargo master branch (using clone and build method)
-RUN git clone --depth 1 --branch master https://github.com/japaric/xargo.git /opt/xargo && \
-    cd /opt/xargo && \
-    cargo build --release && \
-    cp target/release/xargo /root/.cargo/bin/ && \
-    rm -rf /opt/xargo
 
 # Clone and build Intel SGX SDK 2.25 version
 WORKDIR /opt
 RUN git clone --depth 1 --branch sgx_2.25 https://github.com/intel/linux-sgx.git intel-sgx
+
 
 # Build Intel SGX SDK
 WORKDIR /opt/intel-sgx
@@ -57,7 +55,8 @@ RUN make sdk_install_pkg
 WORKDIR /opt/intel-sgx/linux/installer/bin
 RUN echo "yes" | ./sgx_linux_x64_sdk_*.bin --prefix=/opt/intel
 
-# Stage 3: Application Compilation
+
+# Application Compilation
 FROM sgx-builder AS app
 
 # Set working directory to project root
@@ -65,15 +64,6 @@ WORKDIR /opt/test-enclave
 
 # Copy project files
 COPY . .
-
-# Clone Teaclave SGX SDK
-RUN cd .. && \
-    git clone --depth 1 --branch main https://github.com/2nado/incubator-teaclave-sgx-sdk.git && \
-    mv incubator-teaclave-sgx-sdk teaclave-sgx-sdk
-
-# Create necessary directory structure
-RUN mkdir -p ../../edl ../../common/inc && \
-    cp buildenv.mk ../../buildenv.mk
 
 # Set Intel SGX SDK environment variables
 ENV SGX_SDK=/opt/intel/sgxsdk
@@ -85,11 +75,11 @@ ENV SGX_MODE=SIM
 
 # Automatically set SGX simulator symlinks
 RUN cd /opt/intel/sgxsdk/lib64 && \
-    rm -f libsgx_urts.so.2 && \
-    ln -s libsgx_urts_sim.so libsgx_urts.so.2
+   rm -f libsgx_urts.so.2 && \
+   ln -s libsgx_urts_sim.so libsgx_urts.so.2
 
 # Build entire project using XARGO_SGX=1 make
-RUN XARGO_SGX=1 make
+RUN make
 
 # Expose port
 EXPOSE 8080

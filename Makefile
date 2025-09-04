@@ -20,150 +20,187 @@
 SGX_SDK ?= /opt/intel/sgxsdk
 SGX_MODE ?= SIM
 SGX_ARCH ?= x64
+SGX_DEBUG ?= 1
 
-######## Rust Version Settings ########
-
-# 设置不同的Rust版本
-ENCLAVE_RUST_VERSION := nightly-2023-12-01
-APP_RUST_VERSION := nightly-2024-10-17
-
-TOP_DIR := ../..
-include $(TOP_DIR)/buildenv.mk
+include $(SGX_SDK)/buildenv.mk
 
 ifeq ($(shell getconf LONG_BIT), 32)
-	SGX_ARCH := x86
+    SGX_ARCH := x86
 else ifeq ($(findstring -m32, $(CXXFLAGS)), -m32)
-	SGX_ARCH := x86
+    SGX_ARCH := x86
 endif
 
 ifeq ($(SGX_ARCH), x86)
-	SGX_COMMON_CFLAGS := -m32
-	SGX_LIBRARY_PATH := $(SGX_SDK)/lib
-	SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x86/sgx_sign
-	SGX_EDGER8R := $(SGX_SDK)/bin/x86/sgx_edger8r
+    SGX_COMMON_FLAGS := -m32
+    SGX_LIBRARY_PATH := $(SGX_SDK)/lib
+    SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x86/sgx_sign
+    SGX_EDGER8R := $(SGX_SDK)/bin/x86/sgx_edger8r
 else
-	SGX_COMMON_CFLAGS := -m64
-	SGX_LIBRARY_PATH := $(SGX_SDK)/lib64
-	SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x64/sgx_sign
-	SGX_EDGER8R := $(SGX_SDK)/bin/x64/sgx_edger8r
+    SGX_COMMON_FLAGS := -m64
+    SGX_LIBRARY_PATH := $(SGX_SDK)/lib64
+    SGX_ENCLAVE_SIGNER := $(SGX_SDK)/bin/x64/sgx_sign
+    SGX_EDGER8R := $(SGX_SDK)/bin/x64/sgx_edger8r
 endif
 
 ifeq ($(SGX_DEBUG), 1)
-ifeq ($(SGX_PRERELEASE), 1)
-$(error Cannot set SGX_DEBUG and SGX_PRERELEASE at the same time!!)
-endif
-endif
-
-ifeq ($(SGX_DEBUG), 1)
-	SGX_COMMON_CFLAGS += -O0 -g
+    SGX_COMMON_FLAGS += -O0 -g
 else
-	SGX_COMMON_CFLAGS += -O2
+    SGX_COMMON_FLAGS += -O2
 endif
 
-SGX_COMMON_CFLAGS += -fstack-protector
+SGX_COMMON_FLAGS += -Wall -Wextra -Winit-self -Wpointer-arith -Wreturn-type \
+                    -Waddress -Wsequence-point -Wformat-security \
+                    -Wmissing-include-dirs -Wfloat-equal -Wundef -Wshadow \
+                    -Wcast-align -Wcast-qual -Wconversion -Wredundant-decls
 
-######## CUSTOM Settings ########
-
-CUSTOM_LIBRARY_PATH := ./lib
-CUSTOM_BIN_PATH := ./bin
-CUSTOM_EDL_PATH := ../../edl
-CUSTOM_COMMON_PATH := ../../common
-
-######## EDL Settings ########
-
-Enclave_EDL_Files := enclave/Enclave_t.c enclave/Enclave_t.h app/Enclave_u.c app/Enclave_u.h
-
-######## APP Settings ########
-
-App_Rust_Flags := --release
-App_SRC_Files := $(shell find app/ -type f -name '*.rs') $(shell find app/ -type f -name 'Cargo.toml')
-App_Include_Paths := -I ./app -I./include -I$(SGX_SDK)/include -I$(CUSTOM_EDL_PATH)
-App_C_Flags := $(SGX_COMMON_CFLAGS) -fPIC -Wno-attributes $(App_Include_Paths)
-
-App_Rust_Path := ./app/target/release
-App_Enclave_u_Object :=lib/libEnclave_u.a
-App_Name := bin/app
-
-######## Enclave Settings ########
+SGX_COMMON_CFLAGS := $(SGX_COMMON_FLAGS) -Wjump-misses-init -Wstrict-prototypes -Wunsuffixed-float-constants
+SGX_COMMON_CXXFLAGS := $(SGX_COMMON_FLAGS) -Wnon-virtual-dtor -std=c++11
 
 ifneq ($(SGX_MODE), HW)
-	Trts_Library_Name := sgx_trts_sim
-	Service_Library_Name := sgx_tservice_sim
+    Urts_Library_Name := sgx_urts_sim
 else
-	Trts_Library_Name := sgx_trts
-	Service_Library_Name := sgx_tservice
+    Urts_Library_Name := sgx_urts
 endif
+
+App_Cpp_Files := App/App.cpp
+App_Include_Paths := -IApp -I$(SGX_SDK)/include -I/usr/local/include
+App_C_Flags := -fPIC -Wno-attributes -fpermissive -Wno-deprecated-declarations $(App_Include_Paths)
+
+ifeq ($(SGX_DEBUG), 1)
+    App_C_Flags += -DDEBUG -UNDEBUG -UEDEBUG
+else
+    App_C_Flags += -DNDEBUG -UEDEBUG -UDEBUG
+endif
+
+App_Cpp_Flags := $(App_C_Flags)
+App_Link_Flags := -L$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -lcurl -ljson-c -lssl -lcrypto -lmicrohttpd
+
+App_Cpp_Objects := $(App_Cpp_Files:.cpp=.o)
+App_Name := bin/app
+
+ifneq ($(SGX_MODE), HW)
+    Trts_Library_Name := sgx_trts_sim
+    Service_Library_Name := sgx_tservice_sim
+else
+    Trts_Library_Name := sgx_trts
+    Service_Library_Name := sgx_tservice
+endif
+
 Crypto_Library_Name := sgx_tcrypto
-KeyExchange_Library_Name := sgx_tkey_exchange
-ProtectedFs_Library_Name := sgx_tprotected_fs
 
-RustEnclave_C_Files := $(wildcard ./enclave/*.c)
-RustEnclave_C_Objects := $(RustEnclave_C_Files:.c=.o)
+Enclave_Cpp_Files := Enclave/Enclave.cpp
+Enclave_Include_Paths := -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
 
-RustEnclave_Include_Paths := -I$(CUSTOM_COMMON_PATH)/inc -I$(CUSTOM_EDL_PATH) -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I ./enclave -I./include
+Enclave_C_Flags := $(Enclave_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections
+Enclave_Cpp_Flags := $(Enclave_C_Flags) -nostdinc++
 
-RustEnclave_Link_Libs := -L$(CUSTOM_LIBRARY_PATH) -L./lib -lenclave -lsgx_trts -lsgx_tcrypto -lsgx_tstdc
-RustEnclave_Compile_Flags := $(SGX_COMMON_CFLAGS) $(ENCLAVE_CFLAGS) $(RustEnclave_Include_Paths)
-RustEnclave_Link_Flags := -Wl,--allow-multiple-definition -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_LIBRARY_PATH) -l$(Trts_Library_Name) -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--allow-multiple-definition -Wl,-pie,-eenclave_entry -Wl,--export-dynamic -Wl,--defsym,__ImageBase=0 -Wl,--gc-sections \
-	-Wl,--start-group $(RustEnclave_Link_Libs) -Wl,--end-group \
-	-Wl,--version-script=enclave/Enclave.lds \
-	$(ENCLAVE_LDFLAGS)
+Enclave_Security_Link_Flags := -Wl,-z,relro,-z,now,-z,noexecstack
 
-RustEnclave_Name := enclave/enclave.so
-Signed_RustEnclave_Name := bin/enclave.signed.so
+Enclave_Link_Flags := $(Enclave_Security_Link_Flags) \
+    -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_LIBRARY_PATH) \
+    -Wl,--whole-archive -l$(Trts_Library_Name) -Wl,--no-whole-archive \
+    -Wl,--start-group -lsgx_tstdc -lsgx_tcxx -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group \
+    -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
+    -Wl,-pie,-eenclave_entry -Wl,--export-dynamic \
+    -Wl,--defsym,__ImageBase=0 -Wl,--gc-sections
 
-.PHONY: all
-all: $(App_Name) $(Signed_RustEnclave_Name)
+Enclave_Cpp_Objects := $(sort $(Enclave_Cpp_Files:.cpp=.o))
 
-######## EDL Objects ########
+Enclave_Name := bin/Enclave.so
+Signed_Enclave_Name := bin/Enclave.signed.so
+Enclave_Config_File := Enclave/Enclave.config.xml
+Enclave_Test_Key := Enclave_private_test.pem
 
-$(Enclave_EDL_Files): $(SGX_EDGER8R) enclave/Enclave.edl
-	$(SGX_EDGER8R) --trusted enclave/Enclave.edl --search-path $(SGX_SDK)/edl --search-path $(CUSTOM_EDL_PATH) --trusted-dir enclave
-	$(SGX_EDGER8R) --untrusted enclave/Enclave.edl --search-path $(SGX_SDK)/edl --search-path $(CUSTOM_EDL_PATH) --untrusted-dir app
-	@echo "GEN  =>  $(Enclave_EDL_Files)"
+ifeq ($(SGX_MODE), HW)
+ifeq ($(SGX_DEBUG), 1)
+    Build_Mode = HW_DEBUG
+else
+    Build_Mode = HW_RELEASE
+endif
+else
+ifeq ($(SGX_DEBUG), 1)
+    Build_Mode = SIM_DEBUG
+else
+    Build_Mode = SIM_RELEASE
+endif
+endif
 
-######## App Objects ########
+.PHONY: all target run clean
 
-app/Enclave_u.o: $(Enclave_EDL_Files)
-	@$(CC) $(App_C_Flags) -c app/Enclave_u.c -o $@
+all: .config_$(Build_Mode)_$(SGX_ARCH)
+	@$(MAKE) target
+
+ifeq ($(Build_Mode), HW_RELEASE)
+target: $(App_Name) $(Enclave_Name)
+	@echo "The project has been built in release hardware mode."
+	@echo "Please sign the $(Enclave_Name) first with your signing key before you run the $(App_Name) to launch and access the enclave."
+	@echo "To sign the enclave use the command:"
+	@echo "   $(SGX_ENCLAVE_SIGNER) sign -key <your key> -enclave $(Enclave_Name) -out <$(Signed_Enclave_Name)> -config $(Enclave_Config_File)"
+else
+target: $(App_Name) $(Signed_Enclave_Name)
+ifeq ($(Build_Mode), HW_DEBUG)
+	@echo "The project has been built in debug hardware mode."
+else ifeq ($(Build_Mode), SIM_DEBUG)
+	@echo "The project has been built in debug simulation mode."
+else
+	@echo "The project has been built in release simulation mode."
+endif
+endif
+
+run: all
+ifneq ($(Build_Mode), HW_RELEASE)
+	@$(CURDIR)/$(App_Name)
+	@echo "RUN  =>  $(App_Name) [$(SGX_MODE)|$(SGX_ARCH), OK]"
+endif
+
+.config_$(Build_Mode)_$(SGX_ARCH):
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.*
+	@touch .config_$(Build_Mode)_$(SGX_ARCH)
+
+App/Enclave_u.h: $(SGX_EDGER8R) Enclave/Enclave.edl
+	@cd App && $(SGX_EDGER8R) --untrusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
+	@echo "GEN  =>  $@"
+
+App/Enclave_u.c: App/Enclave_u.h
+
+App/Enclave_u.o: App/Enclave_u.c
+	@$(CC) $(SGX_COMMON_CFLAGS) $(App_C_Flags) -c $< -o $@
 	@echo "CC   <=  $<"
 
-$(App_Enclave_u_Object): app/Enclave_u.o
-	$(AR) rcsD $@ $^
+App/App.o: App/App.cpp App/Enclave_u.h
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(App_Cpp_Flags) -c $< -o $@
+	@echo "CXX  <=  $<"
 
-$(App_Name): $(App_Enclave_u_Object) $(App_SRC_Files)
-	@cd app && rustup default $(APP_RUST_VERSION) && rustup component add rust-src &&SGX_SDK=$(SGX_SDK) cargo build $(App_Rust_Flags) 2>&1 | tee -a ../build.log
-	@echo "Cargo  =>  $@"
-	mkdir -p bin
-	cp $(App_Rust_Path)/app ./bin
-
-######## Enclave Objects ########
-
-enclave/Enclave_t.o app/ocall_stubs.o: $(Enclave_EDL_Files)
-	@$(CC) $(RustEnclave_Compile_Flags) -c enclave/Enclave_t.c -o $@
-	@echo "CC   <=  $<"
-
-
-$(RustEnclave_Name): enclave enclave/Enclave_t.o app/ocall_stubs.o
-	@$(CXX) enclave/Enclave_t.o app/ocall_stubs.o -o $@ $(RustEnclave_Link_Flags)
+$(App_Name): App/Enclave_u.o App/App.o
+	@$(CXX) $^ -o $@ $(App_Link_Flags)
 	@echo "LINK =>  $@"
 
-$(Signed_RustEnclave_Name): $(RustEnclave_Name)
-	mkdir -p bin
-	@$(SGX_ENCLAVE_SIGNER) sign -key enclave/Enclave_private.pem -enclave $(RustEnclave_Name) -out $@ -config enclave/Enclave.config.xml
+Enclave/Enclave_t.h: $(SGX_EDGER8R) Enclave/Enclave.edl
+	@cd Enclave && $(SGX_EDGER8R) --trusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
+	@echo "GEN  =>  $@"
+
+Enclave/Enclave_t.c: Enclave/Enclave_t.h
+
+Enclave/Enclave_t.o: Enclave/Enclave_t.c
+	@$(CC) $(SGX_COMMON_CFLAGS) $(Enclave_C_Flags) -c $< -o $@
+	@echo "CC   <=  $<"
+
+Enclave/Enclave.o: Enclave/Enclave.cpp Enclave/Enclave_t.h
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(Enclave_Cpp_Flags) -c $< -o $@
+	@echo "CXX  <=  $<"
+
+$(Enclave_Name): Enclave/Enclave_t.o Enclave/Enclave.o
+	@$(CXX) $^ -o $@ $(Enclave_Link_Flags)
+	@echo "LINK =>  $@"
+
+$(Signed_Enclave_Name): $(Enclave_Name)
+ifeq ($(wildcard $(Enclave_Test_Key)),)
+	@echo "There is no enclave test key<Enclave_private_test.pem>."
+	@echo "The project will generate a key<Enclave_private_test.pem> for test."
+	@openssl genrsa -out $(Enclave_Test_Key) -3 3072
+endif
+	@$(SGX_ENCLAVE_SIGNER) sign -key $(Enclave_Test_Key) -enclave $(Enclave_Name) -out $@ -config $(Enclave_Config_File)
 	@echo "SIGN =>  $@"
 
-.PHONY: enclave
-enclave:
-	rustup default $(ENCLAVE_RUST_VERSION)
-	rustup component add rust-src
-	$(MAKE) -C ./enclave/ 2>&1 | tee -a build.log	
-
-.PHONY: clean
 clean:
-	@rm -f $(App_Name) $(RustEnclave_Name) $(Signed_RustEnclave_Name) enclave/*_t.* app/*_u.* lib/*.a
-	@cd enclave && cargo clean && rm -f Cargo.lock
-	@cd app && cargo clean && rm -f Cargo.lock
-
-app/ocall_stubs.o: app/ocall_stubs.c
-	@$(CC) $(App_C_Flags) -c app/ocall_stubs.c -o $@
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Enclave_Test_Key)

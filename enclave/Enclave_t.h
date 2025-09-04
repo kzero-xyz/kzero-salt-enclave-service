@@ -17,6 +17,7 @@ extern "C" {
 
 sgx_status_t jwt_to_salt(const uint8_t* some_string, size_t len, uint8_t* output_salt);
 
+sgx_status_t SGX_CDECL ocall_print_message(const char* message);
 
 #ifdef __cplusplus
 }

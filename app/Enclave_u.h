@@ -16,6 +16,10 @@
 extern "C" {
 #endif
 
+#ifndef OCALL_PRINT_MESSAGE_DEFINED__
+#define OCALL_PRINT_MESSAGE_DEFINED__
+void SGX_UBRIDGE(SGX_NOCONVENTION, ocall_print_message, (const char* message));
+#endif
 
 sgx_status_t jwt_to_salt(sgx_enclave_id_t eid, sgx_status_t* retval, const uint8_t* some_string, size_t len, uint8_t* output_salt);
 
