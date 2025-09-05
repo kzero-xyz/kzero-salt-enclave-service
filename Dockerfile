@@ -27,8 +27,6 @@ RUN apt-get update && apt-get install -y \
     autoconf \
     libtool \
     unzip \
-    protobuf-compiler \
-    libprotobuf-dev \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS sgx-builder
