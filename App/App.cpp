@@ -22,11 +22,87 @@ sgx_enclave_id_t global_eid = 0;
 static struct MHD_Daemon* http_daemon = NULL;
 static volatile int server_running = 0;
 
+// Provider enumeration
+typedef enum {
+    PROVIDER_GOOGLE,
+    PROVIDER_GITHUB,
+    PROVIDER_APPLE,
+    PROVIDER_UNKNOWN
+} ProviderType;
+
+// JWT error types
+typedef enum {
+    JWT_ERROR_NONE = 0,
+    JWT_ERROR_INVALID_FORMAT = 1,
+    JWT_ERROR_EXPIRED = 2,
+    JWT_ERROR_INVALID_SIGNATURE = 3,
+    JWT_ERROR_INVALID_ISSUER = 4,
+    JWT_ERROR_INVALID_AUDIENCE = 5,
+    JWT_ERROR_MISSING_KEY = 6,
+    JWT_ERROR_NETWORK = 7,
+    JWT_ERROR_NOT_SUPPORTED = 8,
+    JWT_ERROR_UNKNOWN_PROVIDER = 9,
+    JWT_ERROR = 10
+} JWTErrorType;
+
+// Global variable to store last JWT error
+static JWTErrorType last_jwt_error = JWT_ERROR_NONE;
+
+// JWT processing result structure
+typedef struct {
+    char* salt_result;
+    JWTErrorType error_type;
+    const char* error_message;
+} JWTProcessResult;
+
+// Provider configuration structure
+typedef struct {
+    const char* name;
+    const char* jwks_url;
+    const char* issuer;
+    const char* audience;
+    int supported;
+} ProviderConfig;
+
+// Get error message for JWT error type
+static const char* get_jwt_error_message(JWTErrorType error_type) {
+    switch (error_type) {
+        case JWT_ERROR_NONE:
+            return "No error";
+        case JWT_ERROR_INVALID_FORMAT:
+            return "Invalid JWT format";
+        case JWT_ERROR_EXPIRED:
+            return "JWT token has expired";
+        case JWT_ERROR_INVALID_SIGNATURE:
+            return "Invalid JWT signature";
+        case JWT_ERROR_INVALID_ISSUER:
+            return "Invalid JWT issuer";
+        case JWT_ERROR_INVALID_AUDIENCE:
+            return "Invalid JWT audience";
+        case JWT_ERROR_MISSING_KEY:
+            return "No matching key found for JWT";
+        case JWT_ERROR_NETWORK:
+            return "Failed to fetch JWKS";
+        case JWT_ERROR_NOT_SUPPORTED:
+            return "Provider is not supported yet";
+        case JWT_ERROR_UNKNOWN_PROVIDER:
+            return "Unknown JWK provider";
+        case JWT_ERROR:
+        default:
+            return "JWT verification error";
+    }
+}
+
 // Constant definitions
 static const char* ENCLAVE_FILE = "enclave.signed.so";
-static const char* GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-static const char* AUDIENCE = "560629365517-mt9j9arflcgi35i8hpoptr66qgo1lmfm.apps.googleusercontent.com";
 static const int SERVER_PORT = 8080;
+
+// Provider configurations
+static const ProviderConfig PROVIDER_CONFIGS[] = {
+    {"google", "https://www.googleapis.com/oauth2/v3/certs", "https://accounts.google.com", "560629365517-mt9j9arflcgi35i8hpoptr66qgo1lmfm.apps.googleusercontent.com", 1},
+    {"github", "https://token.actions.githubusercontent.com/.well-known/jwks", "", "", 0},
+    {"apple", "https://appleid.apple.com/auth/keys", "", "", 0}
+};
 
 // HTTP response structure
 struct HTTPResponse {
@@ -51,18 +127,38 @@ void print_error_message(sgx_status_t ret) {
     printf("SGX Error: 0x%X\n", ret);
 }
 
+// Get provider type from string
+ProviderType get_provider_type(const char* provider_str) {
+    if (!provider_str) return PROVIDER_UNKNOWN;
+    
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(provider_str, PROVIDER_CONFIGS[i].name) == 0) {
+            return (ProviderType)i;
+        }
+    }
+    return PROVIDER_UNKNOWN;
+}
+
+// Get provider configuration
+const ProviderConfig* get_provider_config(ProviderType provider) {
+    if (provider >= 0 && provider < 3) {
+        return &PROVIDER_CONFIGS[provider];
+    }
+    return NULL;
+}
+
 // Initialize enclave
 int initialize_enclave(void) {
     sgx_status_t ret = SGX_ERROR_UNEXPECTED;
     
     // Create enclave instance
     ret = sgx_create_enclave(
-        ENCLAVE_FILE,         // enclave file
-        SGX_DEBUG_FLAG,       // debug mode
-        NULL,                 // launch token
-        NULL,                 // launch token size
-        &global_eid,          // enclave ID
-        NULL                  // update info
+        ENCLAVE_FILE,         // Enclave file
+        SGX_DEBUG_FLAG,       // Debug mode
+        NULL,                 // Launch token
+        NULL,                 // Launch token size
+        &global_eid,          // Enclave ID
+        NULL                  // Update info
     );
     
     if (ret != SGX_SUCCESS) {
@@ -211,8 +307,8 @@ static int parse_jwt_header(const char* token, JWTHeader* header) {
 }
 
 // Fetch JWKS from network
-static int fetch_jwks(JWKSResponse* jwks) {
-    printf("[DEBUG] Fetching JWKS from: %s\n", GOOGLE_JWKS_URL);
+static int fetch_jwks(const char* jwks_url, JWKSResponse* jwks) {
+    printf("[DEBUG] Fetching JWKS from: %s\n", jwks_url);
     
     CURL* curl;
     CURLcode res;
@@ -224,7 +320,7 @@ static int fetch_jwks(JWKSResponse* jwks) {
         return -1;
     }
     
-    curl_easy_setopt(curl, CURLOPT_URL, GOOGLE_JWKS_URL);
+    curl_easy_setopt(curl, CURLOPT_URL, jwks_url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
@@ -621,9 +717,22 @@ static int verify_jwt_signature(const char* token, EVP_PKEY* pkey) {
     }
 }
 
-// Verify Google JWT
-int verify_google_jwt(const char* token) {
-    printf("[DEBUG] Starting Google JWT verification...\n");
+// Verify JWT for specific provider
+int verify_jwt_for_provider(const char* token, ProviderType provider) {
+    const ProviderConfig* config = get_provider_config(provider);
+    if (!config) {
+        printf("[ERROR] Unknown provider\n");
+        last_jwt_error = JWT_ERROR_UNKNOWN_PROVIDER;
+        return -1;
+    }
+    
+    if (!config->supported) {
+        printf("[ERROR] Provider '%s' is not supported yet\n", config->name);
+        last_jwt_error = JWT_ERROR_NOT_SUPPORTED;
+        return -1;
+    }
+    
+    printf("[DEBUG] Starting %s JWT verification...\n", config->name);
     
     try {
         // Decode JWT
@@ -636,8 +745,9 @@ int verify_google_jwt(const char* token) {
         
         // Get JWKS
         JWKSResponse jwks = {0};
-        if (fetch_jwks(&jwks) != 0) {
+        if (fetch_jwks(config->jwks_url, &jwks) != 0) {
             printf("[DEBUG] Failed to fetch JWKS\n");
+            last_jwt_error = JWT_ERROR_NETWORK;
             return -1;
         }
         
@@ -654,6 +764,7 @@ int verify_google_jwt(const char* token) {
         if (!matching_key) {
             printf("[DEBUG] No matching key found for kid: %s\n", kid.c_str());
             free_jwks(&jwks);
+            last_jwt_error = JWT_ERROR_MISSING_KEY;
             return -1;
         }
         
@@ -674,6 +785,7 @@ int verify_google_jwt(const char* token) {
                 if (pem_key.empty()) {
                     printf("[ERROR] Failed to convert JWK to PEM\n");
                     free_jwks(&jwks);
+                    last_jwt_error = JWT_ERROR;
                     return -1;
                 }
                 
@@ -685,8 +797,8 @@ int verify_google_jwt(const char* token) {
                 
                 // Create verifier
                 auto verifier = jwt::verify()
-                    .with_issuer("https://accounts.google.com")
-                    .with_audience(AUDIENCE)
+                    .with_issuer(config->issuer)
+                    .with_audience(config->audience)
                     .allow_algorithm(rsa_public_key);
                 
                 // Verify JWT
@@ -695,33 +807,67 @@ int verify_google_jwt(const char* token) {
                 printf("[DEBUG] JWT signature verification successful\n");
                 
                 free_jwks(&jwks);
+                last_jwt_error = JWT_ERROR_NONE;
                 return 0;
             } catch (const std::exception& e) {
-                printf("[ERROR] RSA key creation or verification failed: %s\n", e.what());
+                printf("[ERROR] JWT verification failed: %s\n", e.what());
                 free_jwks(&jwks);
+                
+                // Try to determine error type from exception message
+                std::string error_msg = e.what();
+                if (error_msg.find("expired") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_EXPIRED;
+                } else if (error_msg.find("signature") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_SIGNATURE;
+                } else if (error_msg.find("issuer") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_ISSUER;
+                } else if (error_msg.find("audience") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_AUDIENCE;
+                } else {
+                    last_jwt_error = JWT_ERROR;
+                }
                 return -1;
             }
         } else {
             printf("[ERROR] Missing JWK components (n or e)\n");
             free_jwks(&jwks);
+            last_jwt_error = JWT_ERROR;
             return -1;
         }
     } catch (const std::exception& e) {
-        printf("[ERROR] Google JWT verification failed: %s\n", e.what());
+        printf("[ERROR] %s JWT verification failed: %s\n", config->name, e.what());
+        
+        // Try to determine error type from exception message
+        std::string error_msg = e.what();
+        if (error_msg.find("expired") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_EXPIRED;
+        } else if (error_msg.find("signature") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_SIGNATURE;
+        } else if (error_msg.find("issuer") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_ISSUER;
+        } else if (error_msg.find("audience") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_AUDIENCE;
+        } else {
+            last_jwt_error = JWT_ERROR_INVALID_FORMAT;
+        }
         return -1;
     }
 }
 
 // Process JWT and generate salt
-char* process_jwt_token(const char* jwt_token) {
-    printf("[DEBUG] Processing JWT token...\n");
+JWTProcessResult process_jwt_token(const char* jwt_token, ProviderType provider) {
+    JWTProcessResult result = {NULL, JWT_ERROR_NONE, NULL};
     
-    // First try Google JWT verification
-    if (verify_google_jwt(jwt_token) != 0) {
-        printf("[ERROR] Google JWT verification failed\n");
-        return NULL;  // Return NULL on verification failure
+    printf("[DEBUG] Processing JWT token for provider: %d\n", provider);
+    
+    // Verify JWT for the specified provider
+    if (verify_jwt_for_provider(jwt_token, provider) != 0) {
+        printf("[ERROR] JWT verification failed for provider: %d\n", provider);
+        result.error_type = last_jwt_error;
+        result.error_message = get_jwt_error_message(last_jwt_error);
+        return result;
     } else {
-        printf("[DEBUG] Google JWT verification successful\n");
+        printf("[DEBUG] JWT verification successful\n");
     }
     
     // Call enclave to process JWT
@@ -734,7 +880,9 @@ char* process_jwt_token(const char* jwt_token) {
     
     if (ret != SGX_SUCCESS) {
         printf("[ERROR] ECALL Enclave Failed: %d\n", ret);
-        return NULL;
+        result.error_type = JWT_ERROR;
+        result.error_message = "Enclave processing failed";
+        return result;
     }
     
     printf("[DEBUG] jwt_to_salt success...\n");
@@ -746,8 +894,10 @@ char* process_jwt_token(const char* jwt_token) {
     }
     
     // Convert to string
-    char* result = (char*)malloc(64);
-    snprintf(result, 64, "%llu", decimal_value);
+    result.salt_result = (char*)malloc(64);
+    snprintf(result.salt_result, 64, "%llu", decimal_value);
+    result.error_type = JWT_ERROR_NONE;
+    result.error_message = NULL;
     
     return result;
 }
@@ -796,28 +946,134 @@ static int handle_request(void* cls, struct MHD_Connection* connection,
                 post_data_size = 0;
                 
                 // Return error response
-                const char* error_msg = "{\"error\":\"Invalid JSON\"}";
+                char* response_json = (char*)malloc(256);
+                int len = snprintf(response_json, 256, 
+                        "{\"error\":\"Invalid JSON\",\"status\":\"failed\"}");
+                
                 struct MHD_Response* response = MHD_create_response_from_buffer(
-                    strlen(error_msg), (void*)error_msg, MHD_RESPMEM_PERSISTENT);
+                    len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
                 MHD_add_response_header(response, "Content-Type", "application/json");
+                MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
                 int ret = MHD_queue_response(connection, 400, response);
                 MHD_destroy_response(response);
                 return (ret == MHD_YES) ? MHD_YES : MHD_NO;
             }
             
             json_object* message_obj;
+            json_object* provider_obj;
+            const char* jwt_token = NULL;
+            const char* provider_str = NULL;
+            
+            // Get message (JWT token)
             if (json_object_object_get_ex(json, "message", &message_obj)) {
-                const char* jwt_token = json_object_get_string(message_obj);
-                printf("[DEBUG] Processing JWT: %.100s...\n", jwt_token);
+                jwt_token = json_object_get_string(message_obj);
+            } else {
+                printf("[ERROR] Missing 'message' field in JSON\n");
+                char* response_json = (char*)malloc(256);
+                int len = snprintf(response_json, 256, 
+                        "{\"error\":\"Missing 'message' field\",\"status\":\"failed\"}");
                 
-                char* salt_result = process_jwt_token(jwt_token);
-                if (salt_result) {
-                    printf("[RESPONSE] %s\n", salt_result);
+                struct MHD_Response* response = MHD_create_response_from_buffer(
+                    len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
+                MHD_add_response_header(response, "Content-Type", "application/json");
+                MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+                int ret = MHD_queue_response(connection, 400, response);
+                MHD_destroy_response(response);
+                
+                json_object_put(json);
+                free(post_data);
+                post_data = NULL;
+                post_data_size = 0;
+                return (ret == MHD_YES) ? MHD_YES : MHD_NO;
+            }
+            
+            // Get provider
+            if (json_object_object_get_ex(json, "provider", &provider_obj)) {
+                provider_str = json_object_get_string(provider_obj);
+            } else {
+                printf("[ERROR] Missing 'provider' field in JSON\n");
+                char* response_json = (char*)malloc(256);
+                int len = snprintf(response_json, 256, 
+                        "{\"error\":\"Missing 'provider' field\",\"status\":\"failed\"}");
+                
+                struct MHD_Response* response = MHD_create_response_from_buffer(
+                    len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
+                MHD_add_response_header(response, "Content-Type", "application/json");
+                MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+                int ret = MHD_queue_response(connection, 400, response);
+                MHD_destroy_response(response);
+                
+                json_object_put(json);
+                free(post_data);
+                post_data = NULL;
+                post_data_size = 0;
+                return (ret == MHD_YES) ? MHD_YES : MHD_NO;
+            }
+            
+            // Validate provider
+            ProviderType provider = get_provider_type(provider_str);
+            if (provider == PROVIDER_UNKNOWN) {
+                printf("[ERROR] Unknown provider: %s\n", provider_str);
+                char* response_json = (char*)malloc(256);
+                int len = snprintf(response_json, 256, 
+                        "{\"error\":\"Unknown provider\",\"status\":\"failed\"}");
+                
+                struct MHD_Response* response = MHD_create_response_from_buffer(
+                    len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
+                MHD_add_response_header(response, "Content-Type", "application/json");
+                MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+                int ret = MHD_queue_response(connection, 400, response);
+                MHD_destroy_response(response);
+                
+                json_object_put(json);
+                free(post_data);
+                post_data = NULL;
+                post_data_size = 0;
+                return (ret == MHD_YES) ? MHD_YES : MHD_NO;
+            }
+            
+            // Check if provider is supported
+            const ProviderConfig* config = get_provider_config(provider);
+            if (!config || !config->supported) {
+                printf("[ERROR] Provider '%s' is not supported yet\n", config->name);
+                char* response_json = (char*)malloc(256);
+                int len = snprintf(response_json, 256, 
+                        "{\"error\":\"Provider '%s' is not supported yet\",\"status\":\"failed\"}", config->name);
+                
+                struct MHD_Response* response = MHD_create_response_from_buffer(
+                    len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
+                MHD_add_response_header(response, "Content-Type", "application/json");
+                MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+                int ret = MHD_queue_response(connection, 400, response);
+                MHD_destroy_response(response);
+                
+                json_object_put(json);
+                free(post_data);
+                post_data = NULL;
+                post_data_size = 0;
+                return (ret == MHD_YES) ? MHD_YES : MHD_NO;
+            }
+            
+            printf("[DEBUG] Processing JWT: %.100s... with provider: %s\n", jwt_token, provider_str);
+            
+            JWTProcessResult jwt_result = process_jwt_token(jwt_token, provider);
+            if (jwt_result.error_type == JWT_ERROR_NONE && jwt_result.salt_result) {
+                    printf("[RESPONSE] %s\n", jwt_result.salt_result);
                     
                     // Create success response
                     char* response_json = (char*)malloc(256);
                     int len = snprintf(response_json, 256, 
-                            "{\"salt\":\"%s\",\"status\":\"success\"}", salt_result);
+                            "{\"salt\":\"%s\",\"status\":\"success\"}", jwt_result.salt_result);
                     
                     printf("[DEBUG] JSON response: %s\n", response_json);
                     printf("[DEBUG] JSON response length: %d\n", len);
@@ -831,7 +1087,7 @@ static int handle_request(void* cls, struct MHD_Connection* connection,
                     
                     int ret = MHD_queue_response(connection, 200, response);
                     MHD_destroy_response(response);
-                    free(salt_result);
+                    free(jwt_result.salt_result);
                     
                     json_object_put(json);
                     free(post_data);
@@ -839,14 +1095,39 @@ static int handle_request(void* cls, struct MHD_Connection* connection,
                     post_data_size = 0;
                     return (ret == MHD_YES) ? MHD_YES : MHD_NO;
                 } else {
-                    printf("[ERROR] Failed to process JWT\n");
+                    printf("[ERROR] JWT processing failed: %s\n", jwt_result.error_message ? jwt_result.error_message : "Unknown error");
                     
-                    const char* error_msg = "{\"error\":\"Failed to process JWT\"}";
+                    char* response_json = (char*)malloc(512);
+                    int len = snprintf(response_json, 512, 
+                            "{\"error\":\"%s\",\"status\":\"failed\"}", 
+                            jwt_result.error_message ? jwt_result.error_message : "Failed to process JWT");
+                    
                     struct MHD_Response* response = MHD_create_response_from_buffer(
-                        strlen(error_msg), (void*)error_msg, MHD_RESPMEM_PERSISTENT);
+                        len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
                     MHD_add_response_header(response, "Content-Type", "application/json");
-                    int ret = MHD_queue_response(connection, 500, response);
+                    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+                    MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
+                    MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
+                    
+                    // Set appropriate HTTP status code based on error type
+                    int http_status = 500; // Default to internal server error
+                    if (jwt_result.error_type == JWT_ERROR_EXPIRED) {
+                        http_status = 401; // Unauthorized for expired tokens
+                    } else if (jwt_result.error_type == JWT_ERROR_INVALID_SIGNATURE || 
+                               jwt_result.error_type == JWT_ERROR_INVALID_ISSUER || 
+                               jwt_result.error_type == JWT_ERROR_INVALID_AUDIENCE) {
+                        http_status = 401; // Unauthorized for invalid tokens
+                    } else if (jwt_result.error_type == JWT_ERROR_INVALID_FORMAT) {
+                        http_status = 400; // Bad request for malformed tokens
+                    }
+                    
+                    int ret = MHD_queue_response(connection, http_status, response);
                     MHD_destroy_response(response);
+                    
+                    // Clean up salt_result if it was allocated
+                    if (jwt_result.salt_result) {
+                        free(jwt_result.salt_result);
+                    }
                     
                     json_object_put(json);
                     free(post_data);
@@ -854,22 +1135,6 @@ static int handle_request(void* cls, struct MHD_Connection* connection,
                     post_data_size = 0;
                     return (ret == MHD_YES) ? MHD_YES : MHD_NO;
                 }
-            } else {
-                printf("[ERROR] Missing 'message' field in JSON\n");
-                
-                const char* error_msg = "{\"error\":\"Missing 'message' field\"}";
-                struct MHD_Response* response = MHD_create_response_from_buffer(
-                    strlen(error_msg), (void*)error_msg, MHD_RESPMEM_PERSISTENT);
-                MHD_add_response_header(response, "Content-Type", "application/json");
-                int ret = MHD_queue_response(connection, 400, response);
-                MHD_destroy_response(response);
-                
-                json_object_put(json);
-                free(post_data);
-                post_data = NULL;
-                post_data_size = 0;
-                return (ret == MHD_YES) ? MHD_YES : MHD_NO;
-            }
         }
     }
     

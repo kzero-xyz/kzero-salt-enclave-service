@@ -158,7 +158,7 @@ Processes JWT tokens and returns salt information.
 **Request:**
 ```bash
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"message": "your_jwt_token_here"}' \
+  -d '{"message": "your_jwt_token_here", "provider": "your_jwk_provider_here"}' \
   http://localhost:8080/get_salt
 ```
 
@@ -173,9 +173,7 @@ curl -X POST -H "Content-Type: application/json" \
 ### Example with Google OAuth JWT
 
 ```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"message": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJkN2VkMzM4YzBmMTQ1N2IyMTRhMjc0YjVlMGU2NjdiNDRhNDJkZGUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMDI2ODcyOTA4OTIwOTUyNDQwNTciLCJub25jZSI6IjJBM0dOTjllZFdjOXhpdWlFTFowZE9VMVJOYyIsIm5iZiI6MTc1NzAwNjA3MCwiaWF0IjoxNzU3MDA2MzcwLCJleHAiOjE3NTcwMDk5NzAsImp0aSI6IjVkZWJmNTgxMjY2ZTVhYTBhNDFkMmMwZWNhZWQwOTlmZTc4MGNjNjMifQ.o65jbFRLTaU2jukoWfX9fh_EMJMrDXp-6GYNueHCzXKno2a_7L0e46ASnA4B9_2p0FU2un-doS9jB4ajR12fx9xaWOHPUYbSJzETXl0S7T73L_1IsaK8YWlW4LiRmjHtK3t2QujKYjH4S8UCEsMNEoRLYvESPO48uK4tARLN3hlopocm3Flap7SqNjF9FER1Hiect75qwWlpncKVZC0xba-NGrKAN6Jm16iJ9zTeoWHZkdHLUtnE-bmRm0Lqtvj2Lp9-zb7vWEvPWLvfHxSGXZ3bbrik0VO8seR2XXZ0DsEGtq7q3i8cJWHYfipUKRuGXSuKhAANS6cm0iYVNVhhCg"}' \
-  http://localhost:8080/get_salt
+curl -X POST http://localhost:8080/get_salt   -H "Content-Type: application/json"   -d '{"message": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJkN2VkMzM4YzBmMTQ1N2IyMTRhMjc0YjVlMGU2NjdiNDRhNDJkZGUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMDI2ODcyOTA4OTIwOTUyNDQwNTciLCJub25jZSI6IkhTcXdzb3k4a1Nwb3Q5LWNrRVVGUGItTGRHMCIsIm5iZiI6MTc1NzA3NjE2NiwiaWF0IjoxNzU3MDc2NDY2LCJleHAiOjE3NTcwODAwNjYsImp0aSI6ImNjZjgyM2FkYjlmNjBjMGFjZDNiNmFlMmFmZWQxMjkwNGRmNTdkZjMifQ.deCKin6mHw47yQ64YT_GZ74baXuOqSFdMhumgjjL2zKNO01P4HACW313a4eLpjEqSml2gFt1XR_StxU-wXCN6etMbGy-4rT88LZ9P5XqRhTexNwLZiY8r38N5mwakWrZYAfr2-jwW8eZ2AfIj8oI8iOqfhWmT-aSmpSGOnBcYqmo2rwhPM8PR-9ZSC3rRTbOhJJ0pkkB9JRGCRQa4dgIlIfbin7QIA4MzTqWsu7DikztaiDUqsnWF-MoUuaj1zuKAE-oT7Vg9fvRQbth-7N5WE6ZAlPlJE7LfCyAT6-2tsaCP_zK7s3X4eppj9Zzr-ZQFSOY_T2baoIV4R9-CisraA","provider": "google"}'
 ```
 
 ## References
