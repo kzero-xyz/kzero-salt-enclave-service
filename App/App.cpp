@@ -30,6 +30,31 @@ typedef enum {
     PROVIDER_UNKNOWN
 } ProviderType;
 
+// JWT error types
+typedef enum {
+    JWT_ERROR_NONE = 0,
+    JWT_ERROR_INVALID_FORMAT = 1,
+    JWT_ERROR_EXPIRED = 2,
+    JWT_ERROR_INVALID_SIGNATURE = 3,
+    JWT_ERROR_INVALID_ISSUER = 4,
+    JWT_ERROR_INVALID_AUDIENCE = 5,
+    JWT_ERROR_MISSING_KEY = 6,
+    JWT_ERROR_NETWORK = 7,
+    JWT_ERROR_NOT_SUPPORTED = 8,
+    JWT_ERROR_UNKNOWN_PROVIDER = 9,
+    JWT_ERROR = 10
+} JWTErrorType;
+
+// Global variable to store last JWT error
+static JWTErrorType last_jwt_error = JWT_ERROR_NONE;
+
+// JWT processing result structure
+typedef struct {
+    char* salt_result;
+    JWTErrorType error_type;
+    const char* error_message;
+} JWTProcessResult;
+
 // Provider configuration structure
 typedef struct {
     const char* name;
@@ -38,6 +63,35 @@ typedef struct {
     const char* audience;
     int supported;
 } ProviderConfig;
+
+// Get error message for JWT error type
+static const char* get_jwt_error_message(JWTErrorType error_type) {
+    switch (error_type) {
+        case JWT_ERROR_NONE:
+            return "No error";
+        case JWT_ERROR_INVALID_FORMAT:
+            return "Invalid JWT format";
+        case JWT_ERROR_EXPIRED:
+            return "JWT token has expired";
+        case JWT_ERROR_INVALID_SIGNATURE:
+            return "Invalid JWT signature";
+        case JWT_ERROR_INVALID_ISSUER:
+            return "Invalid JWT issuer";
+        case JWT_ERROR_INVALID_AUDIENCE:
+            return "Invalid JWT audience";
+        case JWT_ERROR_MISSING_KEY:
+            return "No matching key found for JWT";
+        case JWT_ERROR_NETWORK:
+            return "Failed to fetch JWKS";
+        case JWT_ERROR_NOT_SUPPORTED:
+            return "Provider is not supported yet";
+        case JWT_ERROR_UNKNOWN_PROVIDER:
+            return "Unknown JWK provider";
+        case JWT_ERROR:
+        default:
+            return "JWT verification error";
+    }
+}
 
 // Constant definitions
 static const char* ENCLAVE_FILE = "bin/Enclave.signed.so";
@@ -668,11 +722,13 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
     const ProviderConfig* config = get_provider_config(provider);
     if (!config) {
         printf("[ERROR] Unknown provider\n");
+        last_jwt_error = JWT_ERROR_UNKNOWN_PROVIDER;
         return -1;
     }
     
     if (!config->supported) {
         printf("[ERROR] Provider '%s' is not supported yet\n", config->name);
+        last_jwt_error = JWT_ERROR_NOT_SUPPORTED;
         return -1;
     }
     
@@ -691,6 +747,7 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
         JWKSResponse jwks = {0};
         if (fetch_jwks(config->jwks_url, &jwks) != 0) {
             printf("[DEBUG] Failed to fetch JWKS\n");
+            last_jwt_error = JWT_ERROR_NETWORK;
             return -1;
         }
         
@@ -707,6 +764,7 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
         if (!matching_key) {
             printf("[DEBUG] No matching key found for kid: %s\n", kid.c_str());
             free_jwks(&jwks);
+            last_jwt_error = JWT_ERROR_MISSING_KEY;
             return -1;
         }
         
@@ -727,6 +785,7 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
                 if (pem_key.empty()) {
                     printf("[ERROR] Failed to convert JWK to PEM\n");
                     free_jwks(&jwks);
+                    last_jwt_error = JWT_ERROR;
                     return -1;
                 }
                 
@@ -748,31 +807,65 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
                 printf("[DEBUG] JWT signature verification successful\n");
                 
                 free_jwks(&jwks);
+                last_jwt_error = JWT_ERROR_NONE;
                 return 0;
             } catch (const std::exception& e) {
-                printf("[ERROR] RSA key creation or verification failed: %s\n", e.what());
+                printf("[ERROR] JWT verification failed: %s\n", e.what());
                 free_jwks(&jwks);
+                
+                // Try to determine error type from exception message
+                std::string error_msg = e.what();
+                if (error_msg.find("expired") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_EXPIRED;
+                } else if (error_msg.find("signature") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_SIGNATURE;
+                } else if (error_msg.find("issuer") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_ISSUER;
+                } else if (error_msg.find("audience") != std::string::npos) {
+                    last_jwt_error = JWT_ERROR_INVALID_AUDIENCE;
+                } else {
+                    last_jwt_error = JWT_ERROR;
+                }
                 return -1;
             }
         } else {
             printf("[ERROR] Missing JWK components (n or e)\n");
             free_jwks(&jwks);
+            last_jwt_error = JWT_ERROR;
             return -1;
         }
     } catch (const std::exception& e) {
         printf("[ERROR] %s JWT verification failed: %s\n", config->name, e.what());
+        
+        // Try to determine error type from exception message
+        std::string error_msg = e.what();
+        if (error_msg.find("expired") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_EXPIRED;
+        } else if (error_msg.find("signature") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_SIGNATURE;
+        } else if (error_msg.find("issuer") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_ISSUER;
+        } else if (error_msg.find("audience") != std::string::npos) {
+            last_jwt_error = JWT_ERROR_INVALID_AUDIENCE;
+        } else {
+            last_jwt_error = JWT_ERROR_INVALID_FORMAT;
+        }
         return -1;
     }
 }
 
 // Process JWT and generate salt
-char* process_jwt_token(const char* jwt_token, ProviderType provider) {
+JWTProcessResult process_jwt_token(const char* jwt_token, ProviderType provider) {
+    JWTProcessResult result = {NULL, JWT_ERROR_NONE, NULL};
+    
     printf("[DEBUG] Processing JWT token for provider: %d\n", provider);
     
     // Verify JWT for the specified provider
     if (verify_jwt_for_provider(jwt_token, provider) != 0) {
         printf("[ERROR] JWT verification failed for provider: %d\n", provider);
-        return NULL;  // Return NULL on verification failure
+        result.error_type = last_jwt_error;
+        result.error_message = get_jwt_error_message(last_jwt_error);
+        return result;
     } else {
         printf("[DEBUG] JWT verification successful\n");
     }
@@ -787,7 +880,9 @@ char* process_jwt_token(const char* jwt_token, ProviderType provider) {
     
     if (ret != SGX_SUCCESS) {
         printf("[ERROR] ECALL Enclave Failed: %d\n", ret);
-        return NULL;
+        result.error_type = JWT_ERROR;
+        result.error_message = "Enclave processing failed";
+        return result;
     }
     
     printf("[DEBUG] jwt_to_salt success...\n");
@@ -799,8 +894,10 @@ char* process_jwt_token(const char* jwt_token, ProviderType provider) {
     }
     
     // Convert to string
-    char* result = (char*)malloc(64);
-    snprintf(result, 64, "%llu", decimal_value);
+    result.salt_result = (char*)malloc(64);
+    snprintf(result.salt_result, 64, "%llu", decimal_value);
+    result.error_type = JWT_ERROR_NONE;
+    result.error_message = NULL;
     
     return result;
 }
@@ -969,14 +1066,14 @@ static enum MHD_Result handle_request(void* cls, struct MHD_Connection* connecti
             
             printf("[DEBUG] Processing JWT: %.100s... with provider: %s\n", jwt_token, provider_str);
             
-            char* salt_result = process_jwt_token(jwt_token, provider);
-            if (salt_result) {
-                    printf("[RESPONSE] %s\n", salt_result);
+            JWTProcessResult jwt_result = process_jwt_token(jwt_token, provider);
+            if (jwt_result.error_type == JWT_ERROR_NONE && jwt_result.salt_result) {
+                    printf("[RESPONSE] %s\n", jwt_result.salt_result);
                     
                     // Create success response
                     char* response_json = (char*)malloc(256);
                     int len = snprintf(response_json, 256, 
-                            "{\"salt\":\"%s\",\"status\":\"success\"}", salt_result);
+                            "{\"salt\":\"%s\",\"status\":\"success\"}", jwt_result.salt_result);
                     
                     printf("[DEBUG] JSON response: %s\n", response_json);
                     printf("[DEBUG] JSON response length: %d\n", len);
@@ -990,7 +1087,7 @@ static enum MHD_Result handle_request(void* cls, struct MHD_Connection* connecti
                     
                     int ret = MHD_queue_response(connection, 200, response);
                     MHD_destroy_response(response);
-                    free(salt_result);
+                    free(jwt_result.salt_result);
                     
                     json_object_put(json);
                     free(post_data);
@@ -998,11 +1095,12 @@ static enum MHD_Result handle_request(void* cls, struct MHD_Connection* connecti
                     post_data_size = 0;
                     return (ret == MHD_YES) ? MHD_YES : MHD_NO;
                 } else {
-                    printf("[ERROR] Failed to process JWT\n");
+                    printf("[ERROR] JWT processing failed: %s\n", jwt_result.error_message ? jwt_result.error_message : "Unknown error");
                     
-                    char* response_json = (char*)malloc(256);
-                    int len = snprintf(response_json, 256, 
-                            "{\"error\":\"Failed to process JWT\",\"status\":\"failed\"}");
+                    char* response_json = (char*)malloc(512);
+                    int len = snprintf(response_json, 512, 
+                            "{\"error\":\"%s\",\"status\":\"failed\"}", 
+                            jwt_result.error_message ? jwt_result.error_message : "Failed to process JWT");
                     
                     struct MHD_Response* response = MHD_create_response_from_buffer(
                         len, (void*)response_json, MHD_RESPMEM_MUST_FREE);
@@ -1010,8 +1108,26 @@ static enum MHD_Result handle_request(void* cls, struct MHD_Connection* connecti
                     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
                     MHD_add_response_header(response, "Access-Control-Allow-Methods", "POST, OPTIONS");
                     MHD_add_response_header(response, "Access-Control-Allow-Headers", "Content-Type");
-                    int ret = MHD_queue_response(connection, 500, response);
+                    
+                    // Set appropriate HTTP status code based on error type
+                    int http_status = 500; // Default to internal server error
+                    if (jwt_result.error_type == JWT_ERROR_EXPIRED) {
+                        http_status = 401; // Unauthorized for expired tokens
+                    } else if (jwt_result.error_type == JWT_ERROR_INVALID_SIGNATURE || 
+                               jwt_result.error_type == JWT_ERROR_INVALID_ISSUER || 
+                               jwt_result.error_type == JWT_ERROR_INVALID_AUDIENCE) {
+                        http_status = 401; // Unauthorized for invalid tokens
+                    } else if (jwt_result.error_type == JWT_ERROR_INVALID_FORMAT) {
+                        http_status = 400; // Bad request for malformed tokens
+                    }
+                    
+                    int ret = MHD_queue_response(connection, http_status, response);
                     MHD_destroy_response(response);
+                    
+                    // Clean up salt_result if it was allocated
+                    if (jwt_result.salt_result) {
+                        free(jwt_result.salt_result);
+                    }
                     
                     json_object_put(json);
                     free(post_data);

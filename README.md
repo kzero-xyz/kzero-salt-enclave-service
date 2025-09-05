@@ -42,7 +42,8 @@ Processes JWT tokens and returns salt information.
 **Request Body:**
 ```json
 {
-  "message": "your_jwt_token_here"
+  "message": "your_jwt_token_here",
+  "provider": "your_jwk_provider_here"
 }
 ```
 
