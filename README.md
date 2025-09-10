@@ -26,10 +26,7 @@ docker build -t test-enclave:latest .
 docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.0
 ```
 
-
-
 ### 2. Run the Container
-
 - If you build locally, run this command:
 ```bash
 docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:latest
