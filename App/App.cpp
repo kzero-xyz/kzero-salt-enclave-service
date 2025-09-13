@@ -230,81 +230,6 @@ static int base64url_decode(const char* input, uint8_t* output, int* output_len)
     return 0;
 }
 
-// Parse JWT Header
-static int parse_jwt_header(const char* token, JWTHeader* header) {
-    // Find first dot
-    const char* first_dot = strchr(token, '.');
-    if (!first_dot) return -1;
-    
-    // Find second dot
-    const char* second_dot = strchr(first_dot + 1, '.');
-    if (!second_dot) return -1;
-    
-    // Extract header part
-    size_t header_len = first_dot - token;
-    char* header_b64 = (char*)malloc(header_len + 1);
-    strncpy(header_b64, token, header_len);
-    header_b64[header_len] = '\0';
-    
-    // Base64 decode header
-    uint8_t* header_data = (uint8_t*)malloc(header_len);
-    int header_data_len = header_len;
-    
-    if (base64url_decode(header_b64, header_data, &header_data_len) != 0) {
-        free(header_b64);
-        free(header_data);
-        return -1;
-    }
-    
-    // Parse JSON
-    char* header_json = (char*)malloc(header_data_len + 1);
-    memcpy(header_json, header_data, header_data_len);
-    header_json[header_data_len] = '\0';
-    
-    // Simple JSON parsing to extract kid, alg, typ
-    const char* kid_start = strstr(header_json, "\"kid\":\"");
-    const char* alg_start = strstr(header_json, "\"alg\":\"");
-    const char* typ_start = strstr(header_json, "\"typ\":\"");
-    
-    if (kid_start) {
-        kid_start += 7;
-        const char* kid_end = strchr(kid_start, '"');
-        if (kid_end) {
-            int len = kid_end - kid_start;
-            header->kid = (char*)malloc(len + 1);
-            strncpy(header->kid, kid_start, len);
-            header->kid[len] = '\0';
-        }
-    }
-    
-    if (alg_start) {
-        alg_start += 7;
-        const char* alg_end = strchr(alg_start, '"');
-        if (alg_end) {
-            int len = alg_end - alg_start;
-            header->alg = (char*)malloc(len + 1);
-            strncpy(header->alg, alg_start, len);
-            header->alg[len] = '\0';
-        }
-    }
-    
-    if (typ_start) {
-        typ_start += 7;
-        const char* typ_end = strchr(typ_start, '"');
-        if (typ_end) {
-            int len = typ_end - typ_start;
-            header->typ = (char*)malloc(len + 1);
-            strncpy(header->typ, typ_start, len);
-            header->typ[len] = '\0';
-        }
-    }
-    
-    free(header_b64);
-    free(header_data);
-    free(header_json);
-    
-    return 0;
-}
 
 // Fetch JWKS from network
 static int fetch_jwks(const char* jwks_url, JWKSResponse* jwks) {
@@ -645,77 +570,7 @@ static EVP_PKEY* build_rsa_key_from_jwk(const char* n_str, const char* e_str) {
     return pkey;
 }
 
-// Verify JWT signature
-static int verify_jwt_signature(const char* token, EVP_PKEY* pkey) {
-    printf("[DEBUG] Verifying JWT signature...\n");
-    
-    // Find three parts of JWT
-    const char* first_dot = strchr(token, '.');
-    if (!first_dot) return -1;
-    
-    const char* second_dot = strchr(first_dot + 1, '.');
-    if (!second_dot) return -1;
-    
-    // Extract header and payload
-    size_t header_len = first_dot - token;
-    size_t payload_len = second_dot - (first_dot + 1);
-    size_t signature_len = strlen(second_dot + 1);
-    
-    // Build data to verify (header.payload)
-    char* data_to_verify = (char*)malloc(header_len + 1 + payload_len + 1);
-    strncpy(data_to_verify, token, header_len);
-    data_to_verify[header_len] = '.';
-    strncpy(data_to_verify + header_len + 1, first_dot + 1, payload_len);
-    data_to_verify[header_len + 1 + payload_len] = '\0';
-    
-    // Decode signature
-    uint8_t* signature = (uint8_t*)malloc(signature_len);
-    int sig_len = signature_len;
-    if (base64url_decode_jwk(second_dot + 1, signature, &sig_len) != 0) {
-        printf("[ERROR] Failed to decode signature\n");
-        free(data_to_verify);
-        free(signature);
-        return -1;
-    }
-    
-    // Create EVP_MD_CTX
-    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
-    if (!md_ctx) {
-        printf("[ERROR] Failed to create EVP_MD_CTX\n");
-        free(data_to_verify);
-        free(signature);
-        return -1;
-    }
-    
-    // Initialize verification
-    if (EVP_DigestVerifyInit(md_ctx, NULL, EVP_sha256(), NULL, pkey) != 1) {
-        printf("[ERROR] Failed to initialize digest verify\n");
-        EVP_MD_CTX_free(md_ctx);
-        free(data_to_verify);
-        free(signature);
-        return -1;
-    }
-    
-    // Execute verification
-    int result = EVP_DigestVerify(md_ctx, signature, sig_len, 
-                                 (const unsigned char*)data_to_verify, 
-                                 strlen(data_to_verify));
-    
-    EVP_MD_CTX_free(md_ctx);
-    free(data_to_verify);
-    free(signature);
-    
-    if (result == 1) {
-        printf("[DEBUG] JWT signature verification successful\n");
-        return 0;
-    } else if (result == 0) {
-        printf("[ERROR] JWT signature verification failed\n");
-        return -1;
-    } else {
-        printf("[ERROR] JWT signature verification error\n");
-        return -1;
-    }
-}
+
 
 // Verify JWT for specific provider
 int verify_jwt_for_provider(const char* token, ProviderType provider) {
@@ -795,7 +650,7 @@ int verify_jwt_for_provider(const char* token, ProviderType provider) {
                 // Use jwt-cpp RSA algorithm, following test code approach
                 auto rsa_public_key = jwt::algorithm::rs256(pem_key, "", "", "");
                 
-                // Create verifier
+                // Create verifier (skip expiration time validation by setting large leeway)
                 auto verifier = jwt::verify()
                     .with_issuer(config->issuer)
                     .with_audience(config->audience)
@@ -1194,8 +1049,314 @@ static int start_http_server() {
     return 0;
 }
 
+// Test functions
+#ifdef TEST_MODE
+// Test get_provider_type function
+int test_get_provider_type() {
+    printf("\n=== Testing get_provider_type ===\n");
+    
+    // Test valid providers
+    if (get_provider_type("google") != PROVIDER_GOOGLE) {
+        printf("FAIL: google should return PROVIDER_GOOGLE\n");
+        return -1;
+    }
+    if (get_provider_type("github") != PROVIDER_GITHUB) {
+        printf("FAIL: github should return PROVIDER_GITHUB\n");
+        return -1;
+    }
+    if (get_provider_type("apple") != PROVIDER_APPLE) {
+        printf("FAIL: apple should return PROVIDER_APPLE\n");
+        return -1;
+    }
+    
+    // Test invalid providers
+    if (get_provider_type("invalid") != PROVIDER_UNKNOWN) {
+        printf("FAIL: invalid should return PROVIDER_UNKNOWN\n");
+        return -1;
+    }
+    if (get_provider_type("") != PROVIDER_UNKNOWN) {
+        printf("FAIL: empty string should return PROVIDER_UNKNOWN\n");
+        return -1;
+    }
+    if (get_provider_type(NULL) != PROVIDER_UNKNOWN) {
+        printf("FAIL: NULL should return PROVIDER_UNKNOWN\n");
+        return -1;
+    }
+    
+    printf("PASS: get_provider_type tests\n");
+    return 0;
+}
+
+// Test get_provider_config function
+int test_get_provider_config() {
+    printf("\n=== Testing get_provider_config ===\n");
+    
+    // Test valid provider configurations
+    const ProviderConfig* google_config = get_provider_config(PROVIDER_GOOGLE);
+    if (!google_config) {
+        printf("FAIL: google config should not be NULL\n");
+        return -1;
+    }
+    if (strcmp(google_config->name, "google") != 0) {
+        printf("FAIL: google config name should be 'google'\n");
+        return -1;
+    }
+    if (google_config->supported != 1) {
+        printf("FAIL: google should be supported\n");
+        return -1;
+    }
+    
+    const ProviderConfig* github_config = get_provider_config(PROVIDER_GITHUB);
+    if (!github_config) {
+        printf("FAIL: github config should not be NULL\n");
+        return -1;
+    }
+    if (strcmp(github_config->name, "github") != 0) {
+        printf("FAIL: github config name should be 'github'\n");
+        return -1;
+    }
+    if (github_config->supported != 0) {
+        printf("FAIL: github should not be supported\n");
+        return -1;
+    }
+    
+    // Test invalid provider
+    if (get_provider_config(PROVIDER_UNKNOWN) != NULL) {
+        printf("FAIL: unknown provider should return NULL\n");
+        return -1;
+    }
+    
+    printf("PASS: get_provider_config tests\n");
+    return 0;
+}
+
+// Test get_jwt_error_message function
+int test_get_jwt_error_message() {
+    printf("\n=== Testing get_jwt_error_message ===\n");
+    
+    if (strcmp(get_jwt_error_message(JWT_ERROR_NONE), "No error") != 0) {
+        printf("FAIL: JWT_ERROR_NONE message incorrect\n");
+        return -1;
+    }
+    if (strcmp(get_jwt_error_message(JWT_ERROR_INVALID_FORMAT), "Invalid JWT format") != 0) {
+        printf("FAIL: JWT_ERROR_INVALID_FORMAT message incorrect\n");
+        return -1;
+    }
+    if (strcmp(get_jwt_error_message(JWT_ERROR_EXPIRED), "JWT token has expired") != 0) {
+        printf("FAIL: JWT_ERROR_EXPIRED message incorrect\n");
+        return -1;
+    }
+    
+    printf("PASS: get_jwt_error_message tests\n");
+    return 0;
+}
+
+// Test base64url_decode function
+int test_base64url_decode() {
+    printf("\n=== Testing base64url_decode ===\n");
+    
+    // Test valid Base64 URL encoding
+    const char* input = "SGVsbG8gV29ybGQ";
+    uint8_t output[32];
+    int output_len = 32;
+    
+    if (base64url_decode(input, output, &output_len) != 0) {
+        printf("FAIL: base64url_decode should succeed for valid input\n");
+        return -1;
+    }
+    if (output_len != 11) {
+        printf("FAIL: output length should be 11, got %d\n", output_len);
+        return -1;
+    }
+    
+    // Verify decoded result
+    if (strncmp((char*)output, "Hello World", 11) != 0) {
+        printf("FAIL: decoded content incorrect\n");
+        return -1;
+    }
+    
+    // Test invalid input
+    const char* invalid_input = "Invalid!@#";
+    output_len = 32;
+    if (base64url_decode(invalid_input, output, &output_len) == 0) {
+        printf("FAIL: base64url_decode should fail for invalid input\n");
+        return -1;
+    }
+    
+    printf("PASS: base64url_decode tests\n");
+    return 0;
+}
+
+// Test JWT decode functionality
+int test_jwt_decode() {
+    printf("\n=== Testing JWT Decode ===\n");
+    
+    // Test JWT token
+    const char* test_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjA3ZjA3OGYyNjQ3ZThjZDAxOWM0MGRhOTU2OWU0ZjUyNDc5OTEwOTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMTExNDA0NjE1MzAyNDYxNjQ1MjYiLCJub25jZSI6InlwanZ6TXB6d09qelcycUlrVnBiQU9UTUZuVSIsIm5iZiI6MTc1Nzc1MjA2NCwiaWF0IjoxNzU3NzUyMzY0LCJleHAiOjE3NTc3NTU5NjQsImp0aSI6ImZkYzRmNTc3YWI0NWViZjhiMjU3NjkwMjQwZmUzMTYyOGFkOGI4ZmMifQ.D4NVKogzU76ZGV5HsUDTOHRwSSG1I3lgG4bUEWAeMW8G-QDnXBNY6QDFmYnVEWWx5VlejyQhvmdtJrXF2eDOMKGeOwnFlm1INQuneELbLz0sbKnDw62IKshgQGNP5jv5ij-HEKj3jkx8D1zof83duVDhFOUmDud0VZKPODfBRLbqoTJKz0cp0RwZ5k-SiT_aSeL-y_FodYcCt5VtXIZfvgWj_NbcscqPaIBMvjJ9-wFx8yD-6C5dIQDVgyhZGtLzwxRLZMr6yotBuz_49BlKquuPA6TgNdUvMRu35QRYEQYPx3RigYtKw_8GGW-LVbmZTKSBOKu8QMEweR9CCaBHvg";
+    
+    // Test JWK
+    const char* test_jwk_n = "pX0uFURVHarx3LZWaF4LnP3Kh2MbVl3iEOpQUcSxADEutXj383X9ZU6wdCmX4y_K23b0BU6oID1q0jkEE3sfQYaJJ7Qj9u2UnT-G9oGUoAn9GV1AYWxCNSz9mCrIJxP7ywcrvWJsKiYo7Q3Q-Tz44W1dCdVDQW870eixQSCnc6xrz4tu7RKrpeStH_GDhNIY3tXOuZvlPIvv4PH5sL39RaQ36T8ceGTWVDlYogKtvUUWl2YCGhz0f5y_ToRKU_WjnOmrN25_x30chCH3uz6I1RUa8vTAjbxCk4H5d1NmFNgV1zMSUKG0qo2d91fbyjmIRyODPVuUzSozREcVeSF_3Q";
+    const char* test_jwk_e = "AQAB";
+    const char* test_jwk_kid = "07f078f2647e8cd019c40da9569e4f5247991094";
+    
+    try {
+        // 1. Test JWT decoding
+        printf("[TEST] Decoding JWT token...\n");
+        auto decoded = jwt::decode(std::string(test_jwt));
+        
+        // Verify header information
+        printf("[TEST] JWT Header - kid: %s, alg: %s, typ: %s\n", 
+               decoded.get_key_id().c_str(),
+               decoded.get_algorithm().c_str(), 
+               decoded.get_type().c_str());
+        
+        // Verify kid matches
+        if (decoded.get_key_id() != test_jwk_kid) {
+            printf("FAIL: JWT kid (%s) does not match expected kid (%s)\n", 
+                   decoded.get_key_id().c_str(), test_jwk_kid);
+            return -1;
+        }
+        
+        // Verify algorithm
+        if (decoded.get_algorithm() != "RS256") {
+            printf("FAIL: JWT algorithm (%s) is not RS256\n", decoded.get_algorithm().c_str());
+            return -1;
+        }
+        
+        // Verify type
+        if (decoded.get_type() != "JWT") {
+            printf("FAIL: JWT type (%s) is not JWT\n", decoded.get_type().c_str());
+            return -1;
+        }
+        
+        // 2. Test payload decoding
+        printf("[TEST] JWT Payload information:\n");
+        printf("  iss: %s\n", decoded.get_issuer().c_str());
+        printf("  sub: %s\n", decoded.get_subject().c_str());
+        
+        // Verify issuer
+        if (decoded.get_issuer() != "https://accounts.google.com") {
+            printf("FAIL: JWT issuer (%s) does not match expected issuer\n", decoded.get_issuer().c_str());
+            return -1;
+        }
+        
+        // Verify subject
+        if (decoded.get_subject() != "111140461530246164526") {
+            printf("FAIL: JWT subject (%s) does not match expected subject\n", decoded.get_subject().c_str());
+            return -1;
+        }
+        
+        // 3. Test JWK to PEM conversion
+        printf("[TEST] Converting JWK to PEM format...\n");
+        std::string pem_key = jwk_to_pem(test_jwk_n, test_jwk_e);
+        if (pem_key.empty()) {
+            printf("FAIL: Failed to convert JWK to PEM format\n");
+            return -1;
+        }
+        printf("[TEST] JWK converted to PEM successfully\n");
+        
+        // 4. Test JWT verification (using manually provided JWK)
+        printf("[TEST] Verifying JWT with manual JWK...\n");
+        try {
+            // Create RSA public key
+            auto rsa_public_key = jwt::algorithm::rs256(pem_key, "", "", "");
+            
+            // Create verifier (skip expiration time validation by setting large leeway)
+            auto verifier = jwt::verify()
+                .with_issuer("https://accounts.google.com")
+                .with_audience("560629365517-mt9j9arflcgi35i8hpoptr66qgo1lmfm.apps.googleusercontent.com")
+                .allow_algorithm(rsa_public_key)
+                .leeway(999999999);  // Very large leeway to effectively skip expiration check in test
+            
+            // Verify JWT
+            verifier.verify(decoded);
+            printf("[TEST] JWT signature verification successful!\n");
+            
+        } catch (const std::exception& e) {
+            printf("FAIL: JWT verification failed: %s\n", e.what());
+            return -1;
+        }
+        
+        // 5. Test custom JWKS structure
+        printf("[TEST] Testing custom JWKS structure...\n");
+        JWKSResponse custom_jwks = {0};
+        custom_jwks.keys = (JWKKey*)malloc(sizeof(JWKKey));
+        custom_jwks.key_count = 1;
+        
+        // Initialize key
+        custom_jwks.keys[0].kid = strdup(test_jwk_kid);
+        custom_jwks.keys[0].n = strdup(test_jwk_n);
+        custom_jwks.keys[0].e = strdup(test_jwk_e);
+        custom_jwks.keys[0].alg = strdup("RS256");
+        custom_jwks.keys[0].kty = strdup("RSA");
+        custom_jwks.keys[0].use = strdup("sig");
+        
+        // Find matching key
+        JWKKey* matching_key = NULL;
+        std::string kid = decoded.get_key_id();
+        for (int i = 0; i < custom_jwks.key_count; i++) {
+            if (custom_jwks.keys[i].kid && kid == std::string(custom_jwks.keys[i].kid)) {
+                matching_key = &custom_jwks.keys[i];
+                break;
+            }
+        }
+        
+        if (!matching_key) {
+            printf("FAIL: No matching key found in custom JWKS\n");
+            free_jwks(&custom_jwks);
+            return -1;
+        }
+        
+        printf("[TEST] Found matching key in custom JWKS: kid=%s, alg=%s, kty=%s\n", 
+               matching_key->kid, matching_key->alg, matching_key->kty);
+        
+        // Clean up resources
+        free_jwks(&custom_jwks);
+        
+        printf("PASS: JWT decode tests\n");
+        return 0;
+        
+    } catch (const std::exception& e) {
+        printf("FAIL: JWT decode test failed: %s\n", e.what());
+        return -1;
+    }
+}
+
+// Run all tests
+int run_all_tests() {
+    printf("=== Running Unit Tests ===\n");
+    
+    int failed_tests = 0;
+    
+    if (test_get_provider_type() != 0) failed_tests++;
+    if (test_get_provider_config() != 0) failed_tests++;
+    if (test_get_jwt_error_message() != 0) failed_tests++;
+    if (test_base64url_decode() != 0) failed_tests++;
+    if (test_jwt_decode() != 0) failed_tests++;
+    
+    printf("\n=== Test Results ===\n");
+    if (failed_tests == 0) {
+        printf("All tests PASSED!\n");
+        return 0;
+    } else {
+        printf("%d test(s) FAILED!\n", failed_tests);
+        return -1;
+    }
+}
+#endif
+
 int main(int argc, char* argv[]) {
     printf("=== SGX JWT Salt Generator HTTP Server ===\n\n");
+    
+    // Check if test mode is enabled
+    if (argc > 1 && strcmp(argv[1], "--test") == 0) {
+        #ifdef TEST_MODE
+        return run_all_tests();
+        #else
+        printf("Error: Test mode not enabled. Compile with -DTEST_MODE to enable tests.\n");
+        return -1;
+        #endif
+    }
     
     // Set up signal handling
     signal(SIGINT, signal_handler);

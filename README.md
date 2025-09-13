@@ -137,7 +137,7 @@ git clone git@github.com:kzero-xyz/kzero-salt-enclave-service.git
 cd kzero-salt-enclave-service
 git checkout enclave-hw-mode
 # Build the project
-make
+make TEST_MODE=1
 ```
 
 ### Step 2: Run the Service
@@ -151,6 +151,44 @@ The service will start on port 8080 and display startup messages.
 
 ## API Usage
 
+### Step 3: Run the Test
+```bash
+sudo ./app --test
+```
+You should see the following test result:
+> Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error)
+```bash
+=== Running Unit Tests ===
+
+=== Testing get_provider_type ===
+PASS: get_provider_type tests
+
+=== Testing get_provider_config ===
+PASS: get_provider_config tests
+
+=== Testing get_jwt_error_message ===
+PASS: get_jwt_error_message tests
+
+=== Testing base64url_decode ===
+PASS: base64url_decode tests
+
+=== Testing JWT Decode ===
+[TEST] Decoding JWT token...
+[TEST] JWT Header - kid: 07f078f2647e8cd019c40da9569e4f5247991094, alg: RS256, typ: JWT
+[TEST] JWT Payload information:
+  iss: https://accounts.google.com
+  sub: 111140461530246164526
+[TEST] Converting JWK to PEM format...
+[TEST] JWK converted to PEM successfully
+[TEST] Verifying JWT with manual JWK...
+[TEST] JWT signature verification successful!
+[TEST] Testing custom JWKS structure...
+[TEST] Found matching key in custom JWKS: kid=07f078f2647e8cd019c40da9569e4f5247991094, alg=RS256, kty=RSA
+PASS: JWT decode tests
+
+=== Test Results ===
+All tests PASSED!
+```
 ### POST /get_salt
 
 Processes JWT tokens and returns salt information.
