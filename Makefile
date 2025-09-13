@@ -72,6 +72,10 @@ else
     App_C_Flags += -DNDEBUG -UEDEBUG -UDEBUG
 endif
 
+ifdef TEST_MODE
+    App_C_Flags += -DTEST_MODE
+endif
+
 App_Cpp_Flags := $(App_C_Flags)
 App_Link_Flags := -L$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -lcurl -ljson-c -lssl -lcrypto -lmicrohttpd
 

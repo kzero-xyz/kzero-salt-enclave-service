@@ -77,7 +77,7 @@ RUN cd /opt/intel/sgxsdk/lib64 && \
    ln -s libsgx_urts_sim.so libsgx_urts.so.2
 
 # Build entire project using XARGO_SGX=1 make
-RUN make
+RUN make TEST_MODE=1
 
 # Expose port
 EXPOSE 8080

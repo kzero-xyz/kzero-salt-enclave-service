@@ -36,7 +36,13 @@ docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:
 docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.0
 ```
 
-### 3. Test the API
+
+### 3. Run Tests
+```bash
+docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.0 ./bin/app --test
+```
+
+### 4. Test the API
 
 ```bash
 curl -X POST http://localhost:8080/get_salt   -H "Content-Type: application/json"   -d '{"message": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJkN2VkMzM4YzBmMTQ1N2IyMTRhMjc0YjVlMGU2NjdiNDRhNDJkZGUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMDI2ODcyOTA4OTIwOTUyNDQwNTciLCJub25jZSI6IkhTcXdzb3k4a1Nwb3Q5LWNrRVVGUGItTGRHMCIsIm5iZiI6MTc1NzA2MjA5NiwiaWF0IjoxNzU3MDYyMzk2LCJleHAiOjE3NTcwNjU5OTYsImp0aSI6IjM3ODJiMDc3NmZkYzZlMzZlMWI1ZmM4YmY4N2JkMzExOTJmZmM4MTYifQ.Yl5OeWtcEuHfjn5mNRaI_nNTHtcmQ6Q41C85-0PHX8XytVBzZGaLXxuCEbDogSb4f9MHK56_Zn2kFThhYyZ7uIK9v_EyTf6_ZjJ3IN29ehNHNlvJToqzsCE9O0zQ5yzgIdHMRfg6l3wRGkWGX2ChEtdTy2zMFB6AZP-8nkf2CaKkD5O8aDYurVsew6tneORWE6OnNC6XEITKIU_JhrN-6zND0XirzMZyL-Ozn2U8i7_vMytuFZSjORUSgPglGCmpVOtwwr8CS4679ltqyXZxND4jbt6A3mfHWySxvNJ_AAQiM4rtExg_IQ58sriBBGUcCRL3YcRD8x9iFHGe1sOfzQ","provider": "google"}'
