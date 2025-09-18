@@ -23,7 +23,7 @@ docker build -t test-enclave:latest .
 ```
 - Pulling the docker online:
 ```bash
-docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.0
+docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.1
 ```
 
 ### 2. Run the Container
@@ -33,13 +33,13 @@ docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:
 ```
 - If you pull online, run this command:
 ```bash
-docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.0
+docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.1
 ```
 
 
 ### 3. Run Tests
 ```bash
-docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.0 ./bin/app --test
+docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.1 ./bin/app --test
 ```
 
 You should see the following test result:
