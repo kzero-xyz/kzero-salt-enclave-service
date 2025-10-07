@@ -14,6 +14,16 @@ This project provides a JWT-to-salt conversion service running inside an Intel S
 - **Architecture**: x86_64
 - **Storage**: At least 8GB free disk space
 
+## Salt Generation Principles
+
+The salt server plays an important part in maintaining privacy and security for users' Web2 credentials when using Kzero. Using a secret master seed and the user's JWT, the salt server produces a salt value that is unique to that user for that app, but hides the connection from the user's identity to their Polkadot activity, cryptographically ensuring privacy. The salt value is required before generating a zkLogin proof and therefore before issuing transactions onchain.
+
+When someone uses an app backed by the Kzero salt server, they enter their Web2 credentials and the application requests a JWT from the auth provider. The app then sends the JWT to the salt server to get the salt value. Each time the Polkadot address is derived from the user's identity, the salt is used to ensure that the user's address can always deterministically be computed from their token without revealing the binding between the two.
+
+![salt_derive](./salt_derive.png)
+This service implements a salt generation mechanism that keeps a master seed value and derives a user salt with key derivation by validating and parsing the JWT. For example, using `HKDF(ikm = seed, salt = iss || aud, info = sub)`(To know more about HKDF, please refer to the link [here](https://datatracker.ietf.org/doc/html/rfc5869)).
+> For more details about the salt server, please check [here](https://github.com/kzero-xyz/kzero-grant-docs/blob/main/kzero-salt-service-spec.md)
+
 ## Server Setup
 
 ### Step 1: Create vSGX Instance
@@ -156,7 +166,7 @@ The service will start on port 8080 and display startup messages.
 sudo ./app --test
 ```
 You should see the following test result:
-> Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error)
+> Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error). In the Unit Test, the Google JWK is fixed, the testing JWT is also fixed and matches the Google JWK, so the 'No matching key found for JWT' error won't be found.
 ```bash
 === Running Unit Tests ===
 
@@ -219,6 +229,7 @@ curl -X POST http://localhost:8080/get_salt   -H "Content-Type: application/json
 - [Alibaba Cloud SGX Setup Guide](https://www.alibabacloud.com/help/en/ecs/user-guide/build-an-sgx-encrypted-computing-environment)
 - [Intel SGX Documentation](https://software.intel.com/content/www/us/en/develop/topics/software-guard-extensions.html)
 - [JWT-CPP Library](https://github.com/Thalhammer/jwt-cpp)
+- [RFC 5869 - HMAC-based Extract-and-Expand Key Derivation Function (HKDF)](https://datatracker.ietf.org/doc/html/rfc5869)
 
 ## Development Instance Info
 ```bash
