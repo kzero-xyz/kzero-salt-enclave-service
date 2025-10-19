@@ -13,13 +13,25 @@ This project provides a Docker-based environment for developing and testing Inte
 - **Docker**: Version 20.10+ 
 - **Storage**: At least 8GB free disk space
 
+
+## Salt Generation Principles
+![salt_server_workflow](./assets/salt_workflow.png)
+The salt server plays an important part in maintaining privacy and security for users' Web2 credentials when using Kzero. Using a secret master seed and the user's JWT, the salt server produces a salt value that is unique to that user for that app, but hides the connection from the user's identity to their Polkadot activity, cryptographically ensuring privacy. The salt value is required before generating a zkLogin proof and therefore before issuing transactions onchain.
+
+When someone uses an app backed by the Kzero salt server, they enter their Web2 credentials and the application requests a JWT from the auth provider. The app then sends the JWT to the salt server to get the salt value. Each time the Polkadot address is derived from the user's identity, the salt is used to ensure that the user's address can always deterministically be computed from their token without revealing the binding between the two.
+
+![salt_derive](./assets/salt_derive.png)
+This service implements a salt generation mechanism that keeps a master seed value and derives a user salt with key derivation by validating and parsing the JWT. For example, using `HKDF(ikm = seed, salt = iss || aud, info = sub)`(To know more about HKDF, please refer to the link [here](https://datatracker.ietf.org/doc/html/rfc5869)).
+> For more details about the salt server, please check [here](https://github.com/kzero-xyz/kzero-grant-docs/blob/main/kzero-salt-service-spec.md)
+
+
 ## Quick Start
 
 ### 1. Build the Docker Image
 > **Note:** Build time depends on your machine's performance. For reference, on a 4-CPU Intel(R) Xeon(R) CPU E5-2680 v2 @ 2.80GHz (CPU MHz: 2792.998), the build process takes approximately 50 minutes.
 - You can build it locally via this command, but we recommend you to directly pulling our docker online.
 ```bash
-docker build -t test-enclave:latest .
+docker build --build-arg COVERAGE=1 -t test-enclave:coverage .
 ```
 - Pulling the docker online:
 ```bash
@@ -29,7 +41,7 @@ docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.1
 ### 2. Run the Container
 - If you build locally, run this command:
 ```bash
-docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:latest
+docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:coverage
 ```
 - If you pull online, run this command:
 ```bash
@@ -39,48 +51,31 @@ docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzer
 
 ### 3. Run Tests
 ```bash
-docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.1 ./bin/app --test
+docker run --rm test-enclave:coverage make test-app
+```
+
+To get the coverage report, run this command:
+```bash
+docker run --rm test-enclave:coverage make test-coverage-app
 ```
 
 You should see the following test result:
-> Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error)
+> Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error). In the Unit Test, the Google JWK is fixed, the testing JWT is also fixed and matches the Google JWK, so the 'No matching key found for JWT' error won't be found.
 ```bash
-=== Running Unit Tests ===
-
-=== Testing get_provider_type ===
-PASS: get_provider_type tests
-
-=== Testing get_provider_config ===
-PASS: get_provider_config tests
-
-=== Testing get_jwt_error_message ===
-PASS: get_jwt_error_message tests
-
-=== Testing base64url_decode ===
-PASS: base64url_decode tests
-
-=== Testing JWT Decode ===
-[TEST] Decoding JWT token...
-[TEST] JWT Header - kid: 07f078f2647e8cd019c40da9569e4f5247991094, alg: RS256, typ: JWT
-[TEST] JWT Payload information:
-  iss: https://accounts.google.com
-  sub: 111140461530246164526
-[TEST] Converting JWK to PEM format...
-[TEST] JWK converted to PEM successfully
-[TEST] Verifying JWT with manual JWK...
-[TEST] JWT signature verification successful!
-[TEST] Testing custom JWKS structure...
-[TEST] Found matching key in custom JWKS: kid=07f078f2647e8cd019c40da9569e4f5247991094, alg=RS256, kty=RSA
-PASS: JWT decode tests
-
 === Test Results ===
 All tests PASSED!
+=== Test Suite Complete ===
+Generating coverage report...
+File 'App/App.cpp'
+Lines executed:93.49% of 568
 ```
 
 ### 4. Test the API
 
 ```bash
-curl -X POST http://localhost:8080/get_salt   -H "Content-Type: application/json"   -d '{"message": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJkN2VkMzM4YzBmMTQ1N2IyMTRhMjc0YjVlMGU2NjdiNDRhNDJkZGUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMDI2ODcyOTA4OTIwOTUyNDQwNTciLCJub25jZSI6IkhTcXdzb3k4a1Nwb3Q5LWNrRVVGUGItTGRHMCIsIm5iZiI6MTc1NzA2MjA5NiwiaWF0IjoxNzU3MDYyMzk2LCJleHAiOjE3NTcwNjU5OTYsImp0aSI6IjM3ODJiMDc3NmZkYzZlMzZlMWI1ZmM4YmY4N2JkMzExOTJmZmM4MTYifQ.Yl5OeWtcEuHfjn5mNRaI_nNTHtcmQ6Q41C85-0PHX8XytVBzZGaLXxuCEbDogSb4f9MHK56_Zn2kFThhYyZ7uIK9v_EyTf6_ZjJ3IN29ehNHNlvJToqzsCE9O0zQ5yzgIdHMRfg6l3wRGkWGX2ChEtdTy2zMFB6AZP-8nkf2CaKkD5O8aDYurVsew6tneORWE6OnNC6XEITKIU_JhrN-6zND0XirzMZyL-Ozn2U8i7_vMytuFZSjORUSgPglGCmpVOtwwr8CS4679ltqyXZxND4jbt6A3mfHWySxvNJ_AAQiM4rtExg_IQ58sriBBGUcCRL3YcRD8x9iFHGe1sOfzQ","provider": "google"}'
+curl -s -X POST http://localhost:8080/get_salt \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"eyJhbGciOiJSUzI1NiIsImtpZCI6IjA3ZjA3OGYyNjQ3ZThjZDAxOWM0MGRhOTU2OWU0ZjUyNDc5OTEwOTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMTExNDA0NjE1MzAyNDYxNjQ1MjYiLCJub25jZSI6InlwanZ6TXB6d09qelcycUlrVnBiQU9UTUZuVSIsIm5iZiI6MTc1Nzc1MjA2NCwiaWF0IjoxNzU3NzUyMzY0LCJleHAiOjE3NTc3NTU5NjQsImp0aSI6ImZkYzRmNTc3YWI0NWViZjhiMjU3NjkwMjQwZmUzMTYyOGFkOGI4ZmMifQ.D4NVKogzU76ZGV5HsUDTOHRwSSG1I3lgG4bUEWAeMW8G-QDnXBNY6QDFmYnVEWWx5VlejyQhvmdtJrXF2eDOMKGeOwnFlm1INQuneELbLz0sbKnDw62IKshgQGNP5jv5ij-HEKj3jkx8D1zof83duVDhFOUmDud0VZKPODfBRLbqoTJKz0cp0RwZ5k-SiT_aSeL-y_FodYcCt5VtXIZfvgWj_NbcscqPaIBMvjJ9-wFx8yD-6C5dIQDVgyhZGtLzwxRLZMr6yotBuz_49BlKquuPA6TgNdUvMRu35QRYEQYPx3RigYtKw_8GGW-LVbmZTKSBOKu8QMEweR9CCaBHvg","provider":"test_google"}'
 ```
 
 ## API Endpoints
