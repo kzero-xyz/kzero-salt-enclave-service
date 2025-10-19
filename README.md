@@ -15,12 +15,12 @@ This project provides a JWT-to-salt conversion service running inside an Intel S
 - **Storage**: At least 8GB free disk space
 
 ## Salt Generation Principles
-
+![salt_server_workflow](./assets/salt_workflow.png)
 The salt server plays an important part in maintaining privacy and security for users' Web2 credentials when using Kzero. Using a secret master seed and the user's JWT, the salt server produces a salt value that is unique to that user for that app, but hides the connection from the user's identity to their Polkadot activity, cryptographically ensuring privacy. The salt value is required before generating a zkLogin proof and therefore before issuing transactions onchain.
 
 When someone uses an app backed by the Kzero salt server, they enter their Web2 credentials and the application requests a JWT from the auth provider. The app then sends the JWT to the salt server to get the salt value. Each time the Polkadot address is derived from the user's identity, the salt is used to ensure that the user's address can always deterministically be computed from their token without revealing the binding between the two.
 
-![salt_derive](./salt_derive.png)
+![salt_derive](./assets/salt_derive.png)
 This service implements a salt generation mechanism that keeps a master seed value and derives a user salt with key derivation by validating and parsing the JWT. For example, using `HKDF(ikm = seed, salt = iss || aud, info = sub)`(To know more about HKDF, please refer to the link [here](https://datatracker.ietf.org/doc/html/rfc5869)).
 > For more details about the salt server, please check [here](https://github.com/kzero-xyz/kzero-grant-docs/blob/main/kzero-salt-service-spec.md)
 
@@ -147,7 +147,7 @@ git clone git@github.com:kzero-xyz/kzero-salt-enclave-service.git
 cd kzero-salt-enclave-service
 git checkout enclave-hw-mode
 # Build the project
-make TEST_MODE=1
+make COVERAGE=1 SGX_MODE=HW SGX_DEBUG=1
 ```
 
 ### Step 2: Run the Service
@@ -163,41 +163,21 @@ The service will start on port 8080 and display startup messages.
 
 ### Step 3: Run the Test
 ```bash
-sudo ./app --test
+# run test
+sudo ./bin/test_app
+
+# get the coverage report
+sudo gcov -o tests/test_app.o App/App.cpp
 ```
 You should see the following test result:
 > Notice: In the test, we used a fixed JWK(which is pulled from google  'https://www.googleapis.com/oauth2/v3/certs' at 2025-9-13, and use a fixed JWT which is generated at 2025-9-13, to avoid JWK&JWT expired error). In the Unit Test, the Google JWK is fixed, the testing JWT is also fixed and matches the Google JWK, so the 'No matching key found for JWT' error won't be found.
 ```bash
-=== Running Unit Tests ===
-
-=== Testing get_provider_type ===
-PASS: get_provider_type tests
-
-=== Testing get_provider_config ===
-PASS: get_provider_config tests
-
-=== Testing get_jwt_error_message ===
-PASS: get_jwt_error_message tests
-
-=== Testing base64url_decode ===
-PASS: base64url_decode tests
-
-=== Testing JWT Decode ===
-[TEST] Decoding JWT token...
-[TEST] JWT Header - kid: 07f078f2647e8cd019c40da9569e4f5247991094, alg: RS256, typ: JWT
-[TEST] JWT Payload information:
-  iss: https://accounts.google.com
-  sub: 111140461530246164526
-[TEST] Converting JWK to PEM format...
-[TEST] JWK converted to PEM successfully
-[TEST] Verifying JWT with manual JWK...
-[TEST] JWT signature verification successful!
-[TEST] Testing custom JWKS structure...
-[TEST] Found matching key in custom JWKS: kid=07f078f2647e8cd019c40da9569e4f5247991094, alg=RS256, kty=RSA
-PASS: JWT decode tests
-
 === Test Results ===
 All tests PASSED!
+=== Test Suite Complete ===
+Generating coverage report...
+File 'App/App.cpp'
+Lines executed:93.49% of 568
 ```
 ### POST /get_salt
 
@@ -221,7 +201,9 @@ curl -X POST -H "Content-Type: application/json" \
 ### Example with Google OAuth JWT
 
 ```bash
-curl -X POST http://localhost:8080/get_salt   -H "Content-Type: application/json"   -d '{"message": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJkN2VkMzM4YzBmMTQ1N2IyMTRhMjc0YjVlMGU2NjdiNDRhNDJkZGUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMDI2ODcyOTA4OTIwOTUyNDQwNTciLCJub25jZSI6IkhTcXdzb3k4a1Nwb3Q5LWNrRVVGUGItTGRHMCIsIm5iZiI6MTc1NzA3NjE2NiwiaWF0IjoxNzU3MDc2NDY2LCJleHAiOjE3NTcwODAwNjYsImp0aSI6ImNjZjgyM2FkYjlmNjBjMGFjZDNiNmFlMmFmZWQxMjkwNGRmNTdkZjMifQ.deCKin6mHw47yQ64YT_GZ74baXuOqSFdMhumgjjL2zKNO01P4HACW313a4eLpjEqSml2gFt1XR_StxU-wXCN6etMbGy-4rT88LZ9P5XqRhTexNwLZiY8r38N5mwakWrZYAfr2-jwW8eZ2AfIj8oI8iOqfhWmT-aSmpSGOnBcYqmo2rwhPM8PR-9ZSC3rRTbOhJJ0pkkB9JRGCRQa4dgIlIfbin7QIA4MzTqWsu7DikztaiDUqsnWF-MoUuaj1zuKAE-oT7Vg9fvRQbth-7N5WE6ZAlPlJE7LfCyAT6-2tsaCP_zK7s3X4eppj9Zzr-ZQFSOY_T2baoIV4R9-CisraA","provider": "google"}'
+curl -s -X POST http://localhost:8080/get_salt \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"eyJhbGciOiJSUzI1NiIsImtpZCI6IjA3ZjA3OGYyNjQ3ZThjZDAxOWM0MGRhOTU2OWU0ZjUyNDc5OTEwOTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhenAiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJhdWQiOiI1NjA2MjkzNjU1MTctbXQ5ajlhcmZsY2dpMzVpOGhwb3B0cjY2cWdvMWxtZm0uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLCJzdWIiOiIxMTExNDA0NjE1MzAyNDYxNjQ1MjYiLCJub25jZSI6InlwanZ6TXB6d09qelcycUlrVnBiQU9UTUZuVSIsIm5iZiI6MTc1Nzc1MjA2NCwiaWF0IjoxNzU3NzUyMzY0LCJleHAiOjE3NTc3NTU5NjQsImp0aSI6ImZkYzRmNTc3YWI0NWViZjhiMjU3NjkwMjQwZmUzMTYyOGFkOGI4ZmMifQ.D4NVKogzU76ZGV5HsUDTOHRwSSG1I3lgG4bUEWAeMW8G-QDnXBNY6QDFmYnVEWWx5VlejyQhvmdtJrXF2eDOMKGeOwnFlm1INQuneELbLz0sbKnDw62IKshgQGNP5jv5ij-HEKj3jkx8D1zof83duVDhFOUmDud0VZKPODfBRLbqoTJKz0cp0RwZ5k-SiT_aSeL-y_FodYcCt5VtXIZfvgWj_NbcscqPaIBMvjJ9-wFx8yD-6C5dIQDVgyhZGtLzwxRLZMr6yotBuz_49BlKquuPA6TgNdUvMRu35QRYEQYPx3RigYtKw_8GGW-LVbmZTKSBOKu8QMEweR9CCaBHvg","provider":"test_google"}'
 ```
 
 ## References

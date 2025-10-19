@@ -63,6 +63,7 @@ else
 endif
 
 App_Cpp_Files := App/App.cpp
+Test_Cpp_Files := tests/test_app.cpp
 App_Include_Paths := -IInclude -IApp -I$(SGX_SDK)/include -I/usr/local/include
 App_C_Flags := -fPIC -Wno-attributes $(App_Include_Paths)
 
@@ -77,10 +78,24 @@ ifdef TEST_MODE
 endif
 
 App_Cpp_Flags := $(App_C_Flags)
-App_Link_Flags := -L$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -lcurl -ljson-c -lssl -lcrypto -lmicrohttpd
+App_Link_Flags := -L$(SGX_LIBRARY_PATH) -Wl,-rpath,$(SGX_LIBRARY_PATH) -l$(Urts_Library_Name) -lpthread -lcurl -ljson-c -lssl -lcrypto -lmicrohttpd
+
+# Link SGX uae service library depending on mode
+ifneq ($(SGX_MODE), HW)
+    App_Link_Flags += -lsgx_uae_service_sim
+else
+    App_Link_Flags += -lsgx_uae_service
+endif
+
+ifeq ($(COVERAGE), 1)
+    App_Cpp_Flags += --coverage
+    App_Link_Flags += --coverage
+endif
 
 App_Cpp_Objects := $(App_Cpp_Files:.cpp=.o)
+Test_Cpp_Objects := $(Test_Cpp_Files:.cpp=.o)
 App_Name := app
+Test_Name := bin/test_app
 
 ifneq ($(SGX_MODE), HW)
     Trts_Library_Name := sgx_trts_sim
@@ -129,7 +144,7 @@ else
 endif
 endif
 
-.PHONY: all target run clean
+.PHONY: all target run clean test test-build test-coverage test-run test-run-coverage test-app test-coverage-app
 
 all: .config_$(Build_Mode)_$(SGX_ARCH)
 	@$(MAKE) target
@@ -149,6 +164,12 @@ else ifeq ($(Build_Mode), SIM_DEBUG)
 else
 	@echo "The project has been built in release simulation mode."
 endif
+endif
+
+# Build test target when COVERAGE is enabled
+ifeq ($(COVERAGE), 1)
+target: $(Test_Name)
+	@echo "Test executable built with coverage support"
 endif
 
 run: all
@@ -174,6 +195,12 @@ App/Enclave_u.o: App/Enclave_u.c
 App/App.o: App/App.cpp App/Enclave_u.h
 	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(App_Cpp_Flags) -c $< -o $@
 	@echo "CXX  <=  $<"
+
+# Special rule for App.o when building tests (excludes main function)
+App/App_test.o: App/App.cpp App/Enclave_u.h
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(App_Cpp_Flags) -DTEST_BINARY --coverage -c $< -o $@
+	@echo "CXX  <=  $< (test version)"
+
 
 $(App_Name): App/Enclave_u.o App/App.o
 	@$(CXX) $^ -o $@ $(App_Link_Flags)
@@ -206,5 +233,61 @@ endif
 	@$(SGX_ENCLAVE_SIGNER) sign -key $(Enclave_Test_Key) -enclave $(Enclave_Name) -out $@ -config $(Enclave_Config_File)
 	@echo "SIGN =>  $@"
 
+# Test targets
+test: $(Test_Name)
+	@echo "Running tests..."
+	@$(CURDIR)/$(Test_Name)
+
+test-build: $(Test_Name)
+	@echo "Test executable built successfully: $(Test_Name)"
+
+test-coverage: COVERAGE=1
+test-coverage: test-build
+	@echo "Test executable built with coverage support"
+
+test-run: $(Test_Name)
+	@echo "Running tests..."
+	@$(CURDIR)/$(Test_Name)
+
+test-run-coverage: COVERAGE=1
+test-run-coverage: $(Test_Name)
+	@echo "Running tests with coverage..."
+	@$(CURDIR)/$(Test_Name)
+	@echo "Generating coverage report..."
+	@gcov -o App/App_test.o App/App.cpp
+	@echo "Coverage report generated"
+
+coverage: test-run-coverage
+	@echo "Coverage: $(shell gcov -o App/App_test.o App/App.cpp 2>&1 | grep 'File.*App.cpp' | sed 's/.*Lines executed://' | sed 's/%.*//')%"
+
+# Test command similar to docker run with --test flag
+test-app: COVERAGE=1
+test-app: $(Test_Name)
+	@echo "Running test application..."
+	@$(CURDIR)/$(Test_Name)
+
+# Coverage test command
+test-coverage-app: COVERAGE=1
+test-coverage-app: $(Test_Name)
+	@echo "Running test application with coverage..."
+	@$(CURDIR)/$(Test_Name)
+	@echo "Generating coverage report..."
+	@gcov -o App/App_test App/App.cpp
+	@echo ""
+	@echo "=== Coverage Summary ==="
+	@grep "Lines executed" App.cpp.gcov | head -1
+	@echo "========================"
+
+$(Test_Name): App/Enclave_u.o App/App_test.o $(Test_Cpp_Objects)
+	@$(CXX) $^ -o $@ $(App_Link_Flags) --coverage
+	@echo "LINK =>  $@"
+
+tests/test_app.o: tests/test_app.cpp App/Enclave_u.h
+	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(App_Cpp_Flags) -DTEST_BINARY --coverage -c $< -o $@
+	@echo "CXX  <=  $<"
+
 clean:
-	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Enclave_Test_Key)
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/App_test.o App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Enclave_Test_Key)
+	@rm -f $(Test_Name) $(Test_Cpp_Objects)
+	@rm -f *.gcda *.gcno *.gcov coverage.info
+	@rm -rf coverage_html
