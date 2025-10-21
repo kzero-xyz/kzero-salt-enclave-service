@@ -150,7 +150,7 @@ int run_all_tests() {
     
     // Test utility functions
     if (test_utility_functions() != 0) failed_tests++;
-
+    
     // Test JWK conversion errors
     if (test_jwk_conversion_errors() != 0) failed_tests++;
     
@@ -159,7 +159,7 @@ int run_all_tests() {
     
     // Test CURL and network errors
     if (test_curl_network_errors() != 0) failed_tests++;
-
+    
     // Test get_jwt_error_message function
     if (test_get_jwt_error_message() != 0) failed_tests++;
    
@@ -525,7 +525,7 @@ int test_newly_exposed_functions() {
     
     // Test handle_request function (with mock data)
     printf("[DEBUG] Testing handle_request function\n");
-   
+    
     // Test signal_handler function
     printf("[DEBUG] Testing signal_handler function\n");
     signal_handler(SIGINT);
@@ -533,7 +533,7 @@ int test_newly_exposed_functions() {
     
     signal_handler(SIGTERM);
     printf("[DEBUG] signal_handler(SIGTERM) completed\n");
-   
+    
     return failed_tests;
 }
 
@@ -912,8 +912,8 @@ int test_enclave_call_error() {
     printf("[DEBUG] Test 1 result error_message: %s\n", result1.error_message ? result1.error_message : "NULL");
     if (result1.error_type != JWT_ERROR_NONE) {
         printf("[ERROR] Test 1: Enclave call should return success\n");
-        failed_tests++;
-    }
+            failed_tests++;
+        }
 
 
     // Test 2: Valid JWT token but wrong provider (Google token with GitHub provider)
@@ -1050,9 +1050,9 @@ int test_http_server_real_requests() {
     if (server_result != 0) {
         printf("[ERROR] Failed to start HTTP server: %d\n", server_result);
         failed_tests++;
-        return failed_tests;
-    }
-    
+    return failed_tests;
+}
+
     // Wait for server to start
     sleep(2);
     
@@ -1064,6 +1064,7 @@ int test_http_server_real_requests() {
     
     int curl_result = system(valid_request);
     printf("[DEBUG] Valid request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 2: Send invalid JSON request
     printf("[DEBUG] Sending invalid JSON request...\n");
@@ -1073,6 +1074,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(invalid_request);
     printf("[DEBUG] Invalid JSON request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 3: Send request without message field
     printf("[DEBUG] Sending request without message field...\n");
@@ -1082,6 +1084,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(no_message_request);
     printf("[DEBUG] No message request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 4: Send request without provider field
     printf("[DEBUG] Sending request without provider field...\n");
@@ -1091,6 +1094,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(no_provider_request);
     printf("[DEBUG] No provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 5: Send OPTIONS request (CORS preflight)
     printf("[DEBUG] Sending OPTIONS request...\n");
@@ -1101,6 +1105,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(options_request);
     printf("[DEBUG] OPTIONS request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 6: Send Google provider request
     printf("[DEBUG] Sending Google provider request...\n");
@@ -1110,6 +1115,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(google_request);
     printf("[DEBUG] Google provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 7: Send GitHub provider request
     printf("[DEBUG] Sending GitHub provider request...\n");
@@ -1119,6 +1125,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(github_request);
     printf("[DEBUG] GitHub provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 8: Send Apple provider request
     printf("[DEBUG] Sending Apple provider request...\n");
@@ -1128,6 +1135,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(apple_request);
     printf("[DEBUG] Apple provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 9: Send Telegram provider request
     printf("[DEBUG] Sending Telegram provider request...\n");
@@ -1137,6 +1145,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(telegram_request);
     printf("[DEBUG] Telegram provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     // Test 10: Send unknown provider request
     printf("[DEBUG] Sending unknown provider request...\n");
@@ -1146,6 +1155,7 @@ int test_http_server_real_requests() {
     
     curl_result = system(unknown_request);
     printf("[DEBUG] Unknown provider request result: %d\n", curl_result);
+    if (curl_result != 0) failed_tests++;
     
     printf("[DEBUG] HTTP server real requests test completed\n");
     return failed_tests;
