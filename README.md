@@ -35,7 +35,7 @@ docker build --build-arg COVERAGE=1 -t test-enclave:coverage .
 ```
 - Pulling the docker online:
 ```bash
-docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.1
+docker pull kzeroxyz/kzero-salt-enclave-service:v0.1.2
 ```
 
 ### 2. Run the Container
@@ -45,18 +45,18 @@ docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM test-enclave:
 ```
 - If you pull online, run this command:
 ```bash
-docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.1
+docker run -d -p 8080:8080 --name test-enclave-new -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.2
 ```
 
 
 ### 3. Run Tests
 ```bash
-docker run --rm test-enclave:coverage make test-app
+docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.2 make test-app
 ```
 
 To get the coverage report, run this command:
 ```bash
-docker run --rm test-enclave:coverage make test-coverage-app
+docker run --rm --name test-enclave-test -e SGX_MODE=SIM kzeroxyz/kzero-salt-enclave-service:v0.1.2 make test-coverage-app
 ```
 
 You should see the following test result:
